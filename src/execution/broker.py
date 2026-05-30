@@ -93,6 +93,15 @@ def _to_float(value: object, default: float = 0.0) -> float:
         return default
 
 
+def _enum_str(value: object) -> str:
+    """Return an enum-like value's ``.value``, else ``str(value)``.
+
+    Alpaca returns fields like account status / order side as enums; this
+    yields the clean string ("ACTIVE") instead of the repr ("AccountStatus.ACTIVE").
+    """
+    return str(getattr(value, "value", value))
+
+
 class Broker:
     """Thin, safe wrapper around the Alpaca trading client."""
 
@@ -153,7 +162,7 @@ class Broker:
             raise BrokerError(f"Failed to fetch account: {exc}") from exc
         return AccountSnapshot(
             account_number=str(getattr(acct, "account_number", "")),
-            status=str(getattr(acct, "status", "")),
+            status=_enum_str(getattr(acct, "status", "")),
             currency=str(getattr(acct, "currency", "USD")),
             cash=_to_float(getattr(acct, "cash", None)),
             equity=_to_float(getattr(acct, "equity", None)),
@@ -171,7 +180,7 @@ class Broker:
             PositionInfo(
                 symbol=str(getattr(p, "symbol", "")),
                 qty=_to_float(getattr(p, "qty", None)),
-                side=str(getattr(getattr(p, "side", ""), "value", getattr(p, "side", ""))),
+                side=_enum_str(getattr(p, "side", "")),
                 avg_entry_price=_to_float(getattr(p, "avg_entry_price", None)),
                 current_price=_to_float(getattr(p, "current_price", None)),
                 market_value=_to_float(getattr(p, "market_value", None)),
@@ -242,8 +251,7 @@ class Broker:
     @staticmethod
     def _to_order_info(order: object) -> OrderInfo:
         def _enum_val(attr: str) -> str:
-            raw = getattr(order, attr, "")
-            return str(getattr(raw, "value", raw))
+            return _enum_str(getattr(order, attr, ""))
 
         filled_price = getattr(order, "filled_avg_price", None)
         return OrderInfo(

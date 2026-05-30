@@ -111,6 +111,21 @@ class Settings(BaseSettings):
         description="Directory for the local parquet OHLCV cache.",
     )
 
+    # --- Live loop & trade journal ---
+    default_strategy: str = Field(
+        default="sma",
+        description="Strategy the live loop runs by default ('sma' or 'rsi').",
+    )
+    loop_interval_minutes: int = Field(
+        default=60,
+        gt=0,
+        description="Minutes between scheduled live-loop iterations.",
+    )
+    db_url: str = Field(
+        default="sqlite:///data/paperpilot.db",
+        description="SQLAlchemy URL for the trade journal (gitignored sqlite file).",
+    )
+
     @field_validator("log_level")
     @classmethod
     def _normalize_log_level(cls, v: str) -> str:
@@ -130,6 +145,17 @@ class Settings(BaseSettings):
                 f"DEFAULT_INTERVAL must be one of {sorted(allowed)}, got {v!r}"
             )
         return interval
+
+    @field_validator("default_strategy")
+    @classmethod
+    def _normalize_strategy(cls, v: str) -> str:
+        strategy = v.strip().lower()
+        allowed = {"sma", "rsi"}
+        if strategy not in allowed:
+            raise ValueError(
+                f"DEFAULT_STRATEGY must be one of {sorted(allowed)}, got {v!r}"
+            )
+        return strategy
 
     @model_validator(mode="after")
     def _enforce_live_trading_gate(self) -> "Settings":
@@ -166,6 +192,8 @@ class Settings(BaseSettings):
             "stop_loss_pct": self.stop_loss_pct,
             "log_level": self.log_level,
             "default_interval": self.default_interval,
+            "default_strategy": self.default_strategy,
+            "loop_interval_minutes": self.loop_interval_minutes,
         }
 
 

@@ -15,3 +15,7 @@ pyarrow>=15
 
 # --- Phase 3: backtesting engine ---
 backtesting>=0.3.3,<1
+
+# --- Phase 5: scheduled live loop + SQLite trade journal ---
+SQLAlchemy>=2.0,<3
+APScheduler>=3.10,<4

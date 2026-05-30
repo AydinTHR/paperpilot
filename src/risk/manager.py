@@ -95,6 +95,16 @@ class RiskManager:
     def from_settings(cls, settings: object, starting_equity: float) -> "RiskManager":
         return cls(RiskLimits.from_settings(settings), starting_equity)
 
+    def seed_peak(self, equity: float) -> None:
+        """Raise the tracked peak to ``equity`` if higher (never lowers it).
+
+        Used on live-loop startup to restore the all-time peak from the trade
+        journal, so a process restart cannot quietly forget a drawdown and
+        re-arm the halt from a lower baseline.
+        """
+        if equity > self._peak_equity:
+            self._peak_equity = equity
+
     # --- sizing --------------------------------------------------------------
 
     def position_size(

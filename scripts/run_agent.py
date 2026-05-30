@@ -94,7 +94,8 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_check(settings)
 
     parser.print_help()
-    print("\nThe scheduled trading loop is implemented in Phase 5. Use --check for now.")
+    print("\nUse --check for a connection test, or run the trading loop with "
+          "scripts/run_live.py (--once / --interval MIN / --report).")
     return 0
 
 

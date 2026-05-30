@@ -18,6 +18,9 @@ _ENV_VARS = [
     "DEFAULT_INTERVAL",
     "DATA_CACHE_DIR",
     "UNIVERSE",
+    "DEFAULT_STRATEGY",
+    "LOOP_INTERVAL_MINUTES",
+    "DB_URL",
 ]
 
 

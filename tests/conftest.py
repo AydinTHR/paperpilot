@@ -13,6 +13,9 @@ _ENV_VARS = [
     "MAX_DAILY_LOSS_PCT",
     "LOG_LEVEL",
     "LOG_DIR",
+    "DEFAULT_INTERVAL",
+    "DATA_CACHE_DIR",
+    "UNIVERSE",
 ]
 
 

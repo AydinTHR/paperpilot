@@ -88,6 +88,16 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO")
     log_dir: str = Field(default="logs")
 
+    # --- Market data ---
+    default_interval: str = Field(
+        default="1d",
+        description="Default bar interval for data fetches ('1d' or '1h').",
+    )
+    data_cache_dir: str = Field(
+        default="data/cache",
+        description="Directory for the local parquet OHLCV cache.",
+    )
+
     @field_validator("log_level")
     @classmethod
     def _normalize_log_level(cls, v: str) -> str:
@@ -96,6 +106,17 @@ class Settings(BaseSettings):
         if level not in allowed:
             raise ValueError(f"LOG_LEVEL must be one of {sorted(allowed)}, got {v!r}")
         return level
+
+    @field_validator("default_interval")
+    @classmethod
+    def _normalize_interval(cls, v: str) -> str:
+        interval = v.strip().lower()
+        allowed = {"1d", "1h"}
+        if interval not in allowed:
+            raise ValueError(
+                f"DEFAULT_INTERVAL must be one of {sorted(allowed)}, got {v!r}"
+            )
+        return interval
 
     @model_validator(mode="after")
     def _enforce_live_trading_gate(self) -> "Settings":
@@ -129,6 +150,7 @@ class Settings(BaseSettings):
             "max_position_pct": self.max_position_pct,
             "max_daily_loss_pct": self.max_daily_loss_pct,
             "log_level": self.log_level,
+            "default_interval": self.default_interval,
         }
 
 

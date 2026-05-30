@@ -7,7 +7,10 @@ requires-python = ">=3.11"
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -m 'not network'"
+markers = [
+    "network: requires live network access (deselected by default; run with -m network)",
+]
 
 [tool.ruff]
 line-length = 100

@@ -1,0 +1,142 @@
+"""Application configuration via pydantic-settings.
+
+All settings load from environment variables (and an optional `.env` file).
+Secrets are held as ``SecretStr`` so they never leak into logs or reprs.
+
+Safety contract enforced here:
+  * ``PAPER`` defaults to ``True`` -- simulated trading is the only default path.
+  * Real-money trading (``PAPER=false``) is *refused* unless the operator also
+    sets ``ALLOW_LIVE_TRADING=true``. This makes live trading impossible without
+    a deliberate, manual config change.
+"""
+
+from __future__ import annotations
+
+from functools import lru_cache
+
+from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Always printed on startup.
+DISCLAIMER_BANNER = r"""
+============================================================================
+  PaperPilot  --  Educational project. SIMULATED (paper) trading only.
+  Not financial advice. Past or simulated performance does not predict
+  future results. Use entirely at your own risk.
+============================================================================
+""".strip(
+    "\n"
+)
+
+# Printed ONLY when real-money trading has been deliberately enabled.
+LIVE_TRADING_WARNING = r"""
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+!!                                                                        !!
+!!   ##  LIVE REAL-MONEY TRADING IS ENABLED  ##                           !!
+!!                                                                        !!
+!!   This is NOT a simulation. Orders placed here can lose REAL money.    !!
+!!   PaperPilot is an educational project and is NOT financial advice.    !!
+!!   You have explicitly set PAPER=false and ALLOW_LIVE_TRADING=true.     !!
+!!                                                                        !!
+!!   Press Ctrl-C now if this was not intentional.                        !!
+!!                                                                        !!
+!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+""".strip(
+    "\n"
+)
+
+
+class Settings(BaseSettings):
+    """Strongly-typed, validated application settings."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="ignore",
+    )
+
+    # --- Alpaca credentials (never logged) ---
+    alpaca_api_key: SecretStr = Field(default=SecretStr(""))
+    alpaca_secret_key: SecretStr = Field(default=SecretStr(""))
+
+    # --- Trading mode ---
+    paper: bool = Field(
+        default=True,
+        description="True = simulated paper trading (default, safe).",
+    )
+    allow_live_trading: bool = Field(
+        default=False,
+        description="Deliberate gate that must be True for PAPER=false to be allowed.",
+    )
+
+    # --- Risk limits (fractions of equity, 0..1) ---
+    max_position_pct: float = Field(
+        default=0.10,
+        gt=0,
+        le=1,
+        description="Max fraction of equity allowed in a single position.",
+    )
+    max_daily_loss_pct: float = Field(
+        default=0.03,
+        gt=0,
+        le=1,
+        description="Daily-loss kill switch threshold as a fraction of equity.",
+    )
+
+    # --- Logging ---
+    log_level: str = Field(default="INFO")
+    log_dir: str = Field(default="logs")
+
+    @field_validator("log_level")
+    @classmethod
+    def _normalize_log_level(cls, v: str) -> str:
+        level = v.strip().upper()
+        allowed = {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}
+        if level not in allowed:
+            raise ValueError(f"LOG_LEVEL must be one of {sorted(allowed)}, got {v!r}")
+        return level
+
+    @model_validator(mode="after")
+    def _enforce_live_trading_gate(self) -> "Settings":
+        """Refuse to construct settings that would silently enable live trading."""
+        if not self.paper and not self.allow_live_trading:
+            raise ValueError(
+                "Live trading requested (PAPER=false) but ALLOW_LIVE_TRADING is not "
+                "true. Refusing to start. To deliberately enable real-money trading, "
+                "set ALLOW_LIVE_TRADING=true -- otherwise leave PAPER=true."
+            )
+        return self
+
+    @property
+    def is_live(self) -> bool:
+        """True only when real-money trading is both requested and permitted."""
+        return (not self.paper) and self.allow_live_trading
+
+    @property
+    def has_credentials(self) -> bool:
+        return bool(self.alpaca_api_key.get_secret_value()) and bool(
+            self.alpaca_secret_key.get_secret_value()
+        )
+
+    def safe_summary(self) -> dict[str, object]:
+        """A secret-free view of the config, suitable for logging."""
+        return {
+            "mode": "LIVE" if self.is_live else "PAPER",
+            "paper": self.paper,
+            "allow_live_trading": self.allow_live_trading,
+            "has_credentials": self.has_credentials,
+            "max_position_pct": self.max_position_pct,
+            "max_daily_loss_pct": self.max_daily_loss_pct,
+            "log_level": self.log_level,
+        }
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """Return a cached, validated ``Settings`` instance.
+
+    Cached so the environment is parsed once per process. Tests can call
+    ``get_settings.cache_clear()`` to force a reload.
+    """
+    return Settings()

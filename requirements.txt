@@ -1,0 +1,8 @@
+# PaperPilot dependencies. Pinned to known-good ranges for reproducibility.
+# Grows phase by phase; Phase 1 covers config + Alpaca paper connection.
+
+# --- Phase 1: config, validation, broker ---
+pydantic>=2.7,<3
+pydantic-settings>=2.3,<3
+python-dotenv>=1.0,<2
+alpaca-py>=0.33,<1

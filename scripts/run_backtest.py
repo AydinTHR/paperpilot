@@ -24,6 +24,7 @@ from config.logging_config import get_logger, setup_logging  # noqa: E402
 from config.settings import get_settings  # noqa: E402
 from src.backtest.engine import BacktestConfig, BacktestResult, run_backtest  # noqa: E402
 from src.data.market_data import YFinanceProvider  # noqa: E402
+from src.risk.manager import RiskManager  # noqa: E402
 from src.strategy.base import Strategy  # noqa: E402
 from src.strategy.examples.mean_reversion import RsiMeanReversion  # noqa: E402
 from src.strategy.examples.sma_crossover import SmaCrossover  # noqa: E402
@@ -53,9 +54,22 @@ def _sparkline(series: "object", width: int = 60) -> str:
     return "".join(blocks[i] for i in scaled)
 
 
-def _print_report(result: BacktestResult, *, saved_to: Path | None) -> None:
+def _print_report(
+    result: BacktestResult, *, saved_to: Path | None, risk: RiskManager | None
+) -> None:
     edge = result.return_pct - result.buy_hold_return_pct
     print(f"\n--- Backtest: {result.symbol} / {result.strategy} ({result.interval}) ---")
+    if risk is None:
+        print("  Risk manager    : OFF")
+    else:
+        lim = risk.limits
+        print(
+            f"  Risk manager    : ON  (max_pos {lim.max_position_pct:.0%}, "
+            f"stop {lim.stop_loss_pct:.0%}, daily {lim.max_daily_loss_pct:.0%}, "
+            f"maxDD {lim.max_drawdown_pct:.0%})"
+        )
+        if risk.halted:
+            print(f"  Risk halt       : {risk.halt_reason}")
     print(f"  Period          : {result.start.date()} .. {result.end.date()}")
     print(f"  Trades          : {result.num_trades}")
     print(f"  Exposure        : {result.exposure_pct:6.2f} %")
@@ -89,6 +103,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--commission", type=float, default=0.001)
     parser.add_argument("--slippage", type=float, default=0.0005)
     parser.add_argument("--size", type=float, default=0.95, help="Equity fraction/entry.")
+    parser.add_argument(
+        "--risk",
+        action="store_true",
+        help="Apply the risk manager (position sizing, stop-loss, halts).",
+    )
     parser.add_argument("--no-save", action="store_true", help="Do not write the CSV.")
     args = parser.parse_args(argv)
 
@@ -123,8 +142,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
+    risk = RiskManager.from_settings(settings, config.cash) if args.risk else None
+
     try:
-        result = run_backtest(bars, strategy, config, symbol=symbol, interval=interval)
+        result = run_backtest(
+            bars, strategy, config, symbol=symbol, interval=interval, risk=risk
+        )
     except Exception as exc:  # noqa: BLE001
         print(f"\n[backtest FAILED] {exc}\n")
         logger.error("Backtest failed: %s", exc)
@@ -137,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
         saved_to = out_dir / f"{symbol}_{args.strategy}_{interval}_equity.csv"
         result.equity_curve.to_csv(saved_to, header=["equity"])
 
-    _print_report(result, saved_to=saved_to)
+    _print_report(result, saved_to=saved_to, risk=risk)
     return 0
 
 

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import pandas as pd
 from backtesting import Backtest
@@ -23,6 +24,9 @@ from backtesting import Strategy as BtStrategy
 
 from config.logging_config import get_logger
 from src.strategy.base import Action, Strategy
+
+if TYPE_CHECKING:
+    from src.risk.manager import RiskManager
 
 logger = get_logger(__name__)
 
@@ -91,13 +95,21 @@ class BacktestResult:
 
 
 def _build_adapter(
-    pp_strategy: Strategy, full_df: pd.DataFrame, default_size: float
+    pp_strategy: Strategy,
+    full_df: pd.DataFrame,
+    default_size: float,
+    risk: "RiskManager | None" = None,
 ) -> type[BtStrategy]:
     """Create a ``backtesting.Strategy`` subclass that delegates to ``pp_strategy``.
 
     Long-only (v1): BUY opens a position when flat, SELL closes it, HOLD does
     nothing. The window handed to ``generate_signals`` is sliced to the current
     bar count, which guarantees no look-ahead regardless of engine internals.
+
+    When a :class:`~src.risk.manager.RiskManager` is supplied, it governs every
+    entry: it updates its equity statistics each bar, force-closes the position
+    and blocks new entries while halted, sizes entries by ``max_position_pct``,
+    and attaches a protective stop-loss order at entry.
     """
 
     class _Adapter(BtStrategy):
@@ -105,17 +117,39 @@ def _build_adapter(
             pass
 
         def next(self) -> None:
+            price = float(self.data.Close[-1])
+
+            if risk is not None:
+                risk.update_equity(self.equity, now=self.data.index[-1])
+                if risk.halted:
+                    if self.position:
+                        self.position.close()
+                    return
+
             window = full_df.iloc[: len(self.data)]
             signal = pp_strategy.generate_signals(window)
 
-            if signal.action is Action.BUY:
-                if not self.position.is_long:
-                    frac = signal.size_hint if signal.size_hint is not None else default_size
-                    self.buy(size=max(min(frac, 0.99), 0.001))
-            elif signal.action is Action.SELL:
-                if self.position:
-                    self.position.close()
+            if signal.action is Action.BUY and not self.position.is_long:
+                self._enter(price, signal.size_hint)
+            elif signal.action is Action.SELL and self.position:
+                self.position.close()
             # Action.HOLD -> do nothing
+
+        def _enter(self, price: float, size_hint: float | None) -> None:
+            if risk is None:
+                frac = size_hint if size_hint is not None else default_size
+                self.buy(size=max(min(frac, 0.99), 0.001))
+                return
+
+            # When flat, equity is effectively all cash, so it doubles as the
+            # cash bound for sizing.
+            qty = risk.position_size(self.equity, price, self.equity, size_hint)
+            if qty < 1:
+                return
+            if risk.limits.stop_loss_pct > 0:
+                self.buy(size=qty, sl=risk.stop_price(price))
+            else:
+                self.buy(size=qty)
 
     _Adapter.__name__ = f"Adapter[{pp_strategy.name}]"
     _Adapter.__qualname__ = _Adapter.__name__
@@ -138,8 +172,13 @@ def run_backtest(
     *,
     symbol: str = "",
     interval: str = "",
+    risk: "RiskManager | None" = None,
 ) -> BacktestResult:
-    """Backtest ``strategy`` over ``data`` (a normalised OHLCV frame)."""
+    """Backtest ``strategy`` over ``data`` (a normalised OHLCV frame).
+
+    Pass a :class:`~src.risk.manager.RiskManager` to enforce position sizing,
+    per-trade stops, and the daily/drawdown halts during the run.
+    """
     config = config or BacktestConfig()
 
     if data.empty:
@@ -148,7 +187,7 @@ def run_backtest(
     if missing:
         raise ValueError(f"data missing required column(s) {missing}.")
 
-    adapter = _build_adapter(strategy, data, config.position_size)
+    adapter = _build_adapter(strategy, data, config.position_size, risk)
 
     bt_kwargs: dict[str, object] = {
         "cash": config.cash,

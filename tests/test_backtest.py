@@ -11,6 +11,7 @@ import pandas as pd
 import pytest
 
 from src.backtest.engine import BacktestConfig, BacktestResult, run_backtest
+from src.risk.manager import RiskLimits, RiskManager
 from src.strategy.base import Signal, Strategy
 from src.strategy.examples.mean_reversion import RsiMeanReversion
 from src.strategy.examples.sma_crossover import SmaCrossover
@@ -122,3 +123,29 @@ def test_summary_has_headline_keys() -> None:
     summary = result.summary()
     for key in ("symbol", "strategy", "return_pct", "num_trades", "final_equity", "sharpe"):
         assert key in summary
+
+
+# --- risk integration ------------------------------------------------------
+
+
+def test_backtest_with_risk_reduces_drawdown() -> None:
+    df = _sine_ohlcv()
+    limits = RiskLimits(
+        max_position_pct=0.10,
+        max_daily_loss_pct=0.03,
+        max_drawdown_pct=0.20,
+        stop_loss_pct=0.05,
+    )
+    config = BacktestConfig(cash=10_000.0)
+
+    base = run_backtest(df, SmaCrossover(), config, symbol="TEST", interval="1d")
+    risk = RiskManager(limits, starting_equity=config.cash)
+    risked = run_backtest(
+        df, SmaCrossover(), config, symbol="TEST", interval="1d", risk=risk
+    )
+
+    # Drawdowns are <= 0; capping exposure at 10% (vs the default 95%) plus the
+    # stop-loss can only pull the worst drawdown closer to zero, never deeper.
+    assert risked.max_drawdown_pct <= 0.0
+    assert risked.max_drawdown_pct >= base.max_drawdown_pct
+    assert np.isfinite(risked.final_equity)

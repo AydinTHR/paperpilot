@@ -83,6 +83,19 @@ class Settings(BaseSettings):
         le=1,
         description="Daily-loss kill switch threshold as a fraction of equity.",
     )
+    max_drawdown_pct: float = Field(
+        default=0.20,
+        gt=0,
+        le=1,
+        description="Max-drawdown halt threshold: stop trading once equity falls "
+        "this fraction below its peak.",
+    )
+    stop_loss_pct: float = Field(
+        default=0.05,
+        ge=0,
+        lt=1,
+        description="Per-trade stop-loss distance below entry (0 disables stops).",
+    )
 
     # --- Logging ---
     log_level: str = Field(default="INFO")
@@ -149,6 +162,8 @@ class Settings(BaseSettings):
             "has_credentials": self.has_credentials,
             "max_position_pct": self.max_position_pct,
             "max_daily_loss_pct": self.max_daily_loss_pct,
+            "max_drawdown_pct": self.max_drawdown_pct,
+            "stop_loss_pct": self.stop_loss_pct,
             "log_level": self.log_level,
             "default_interval": self.default_interval,
         }

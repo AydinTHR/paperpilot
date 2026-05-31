@@ -12,10 +12,11 @@ from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from config.settings import Settings
 from src.agent.loop import TradingLoop
-from src.execution.broker import AccountSnapshot, OrderInfo, PositionInfo
+from src.execution.broker import AccountSnapshot, BrokerError, OrderInfo, PositionInfo
 from src.journal.store import Journal
 from src.risk.manager import RiskManager
 from src.strategy.base import Action, Signal, Strategy
@@ -281,3 +282,29 @@ def test_cash_budget_decrements_across_symbols() -> None:
     assert actions["AAA"] == "BUY"
     assert actions["BBB"] == "HOLD"  # cash exhausted -> risk-sized qty < 1
     assert len(broker.orders) == 1
+
+
+def test_from_settings_rejects_zero_equity(monkeypatch) -> None:
+    # A zeroed/empty paper account must fail fast with a clear BrokerError
+    # (caught cleanly by the CLI), not bubble up the RiskManager ValueError.
+    class _ZeroBroker:
+        def __init__(self, settings, announce: bool = True) -> None:
+            pass
+
+        def get_account(self) -> AccountSnapshot:
+            return AccountSnapshot(
+                account_number="TEST", status="ACTIVE", currency="USD",
+                cash=0.0, equity=0.0, buying_power=0.0,
+                portfolio_value=0.0, pattern_day_trader=False,
+            )
+
+    # Patch the broker + data provider the factory builds so no network/SDK runs.
+    monkeypatch.setattr("src.agent.loop.Broker", _ZeroBroker)
+    monkeypatch.setattr("src.agent.loop.YFinanceProvider", lambda settings: object())
+
+    with pytest.raises(BrokerError, match="equity"):
+        TradingLoop.from_settings(
+            Settings(),
+            strategy=_StubStrategy(Signal(Action.HOLD)),
+            journal=Journal("sqlite:///:memory:"),
+        )

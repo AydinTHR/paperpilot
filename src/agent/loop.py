@@ -24,7 +24,7 @@ from typing import Protocol
 from config.logging_config import get_logger
 from config.settings import Settings, get_settings
 from src.data.market_data import YFinanceProvider
-from src.execution.broker import AccountSnapshot, Broker, OrderInfo, PositionInfo
+from src.execution.broker import AccountSnapshot, Broker, BrokerError, OrderInfo, PositionInfo
 from src.journal.store import Journal
 from src.risk.manager import RiskManager
 from src.strategy.base import Action, Strategy
@@ -120,6 +120,13 @@ class TradingLoop:
         journal = journal or Journal(settings.db_url)
 
         account = broker.get_account()
+        if not (account.equity > 0):  # 0, negative, or NaN -> no usable baseline
+            mode = "live" if settings.is_live else "paper"
+            raise BrokerError(
+                f"Account equity is {account.equity:,.2f} {account.currency} -- cannot "
+                f"start the trading loop on an empty account. Reset your Alpaca {mode} "
+                f"account balance in the dashboard (https://app.alpaca.markets) first."
+            )
         risk = RiskManager.from_settings(settings, starting_equity=account.equity)
         peak = journal.peak_equity()
         if peak is not None:

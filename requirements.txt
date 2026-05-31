@@ -19,3 +19,7 @@ backtesting>=0.3.3,<1
 # --- Phase 5: scheduled live loop + SQLite trade journal ---
 SQLAlchemy>=2.0,<3
 APScheduler>=3.10,<4
+
+# --- Phase 6: optional LLM signal layer (provider-agnostic; Claude adapter) ---
+# Soft dependency: imported lazily, only when the LLM strategy is used with a key.
+anthropic>=0.39,<1

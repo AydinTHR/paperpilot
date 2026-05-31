@@ -114,7 +114,7 @@ class Settings(BaseSettings):
     # --- Live loop & trade journal ---
     default_strategy: str = Field(
         default="sma",
-        description="Strategy the live loop runs by default ('sma' or 'rsi').",
+        description="Strategy the live loop runs by default ('sma', 'rsi', or 'llm').",
     )
     loop_interval_minutes: int = Field(
         default=60,
@@ -124,6 +124,34 @@ class Settings(BaseSettings):
     db_url: str = Field(
         default="sqlite:///data/paperpilot.db",
         description="SQLAlchemy URL for the trade journal (gitignored sqlite file).",
+    )
+
+    # --- LLM signal layer (Phase 6, optional) ---
+    llm_provider: str = Field(
+        default="anthropic",
+        description="LLM backend for the optional signal layer "
+        "('anthropic'; other providers reserved).",
+    )
+    llm_model: str = Field(
+        default="claude-3-5-haiku-latest",
+        description="Model name passed to the LLM provider (override per provider).",
+    )
+    llm_max_tokens: int = Field(
+        default=512, gt=0, description="Max tokens for the LLM response."
+    )
+    llm_temperature: float = Field(
+        default=0.0,
+        ge=0,
+        le=2,
+        description="LLM sampling temperature (low = more consistent).",
+    )
+    llm_timeout_seconds: float = Field(
+        default=30.0, gt=0, description="Per-call timeout for the LLM client (seconds)."
+    )
+    anthropic_api_key: SecretStr = Field(
+        default=SecretStr(""),
+        description="Anthropic API key for the LLM layer (env ANTHROPIC_API_KEY). "
+        "Blank disables the LLM strategy (it then HOLDs).",
     )
 
     @field_validator("log_level")
@@ -150,12 +178,23 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_strategy(cls, v: str) -> str:
         strategy = v.strip().lower()
-        allowed = {"sma", "rsi"}
+        allowed = {"sma", "rsi", "llm"}
         if strategy not in allowed:
             raise ValueError(
                 f"DEFAULT_STRATEGY must be one of {sorted(allowed)}, got {v!r}"
             )
         return strategy
+
+    @field_validator("llm_provider")
+    @classmethod
+    def _normalize_llm_provider(cls, v: str) -> str:
+        provider = v.strip().lower()
+        allowed = {"anthropic", "openai"}
+        if provider not in allowed:
+            raise ValueError(
+                f"LLM_PROVIDER must be one of {sorted(allowed)}, got {v!r}"
+            )
+        return provider
 
     @model_validator(mode="after")
     def _enforce_live_trading_gate(self) -> "Settings":
@@ -179,6 +218,11 @@ class Settings(BaseSettings):
             self.alpaca_secret_key.get_secret_value()
         )
 
+    @property
+    def has_llm_key(self) -> bool:
+        """True when an API key for the configured LLM provider is present."""
+        return bool(self.anthropic_api_key.get_secret_value())
+
     def safe_summary(self) -> dict[str, object]:
         """A secret-free view of the config, suitable for logging."""
         return {
@@ -194,6 +238,9 @@ class Settings(BaseSettings):
             "default_interval": self.default_interval,
             "default_strategy": self.default_strategy,
             "loop_interval_minutes": self.loop_interval_minutes,
+            "llm_provider": self.llm_provider,
+            "llm_model": self.llm_model,
+            "has_llm_key": self.has_llm_key,
         }
 
 

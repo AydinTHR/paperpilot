@@ -32,12 +32,14 @@ from src.journal.store import Journal  # noqa: E402
 from src.strategy.base import Strategy  # noqa: E402
 from src.strategy.examples.mean_reversion import RsiMeanReversion  # noqa: E402
 from src.strategy.examples.sma_crossover import SmaCrossover  # noqa: E402
+from src.strategy.llm.strategy import LlmStrategy  # noqa: E402
 
 logger = get_logger("paperpilot.live")
 
 _STRATEGIES: dict[str, type[Strategy]] = {
     "sma": SmaCrossover,
     "rsi": RsiMeanReversion,
+    "llm": LlmStrategy,
 }
 
 

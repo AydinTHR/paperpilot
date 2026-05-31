@@ -27,8 +27,14 @@ from src.strategy.examples.sma_crossover import SmaCrossover  # noqa: E402
 logger = get_logger("paperpilot.preview")
 
 
-def _build_strategies() -> list[Strategy]:
-    return [SmaCrossover(), RsiMeanReversion()]
+def _build_strategies(include_llm: bool = False) -> list[Strategy]:
+    strategies: list[Strategy] = [SmaCrossover(), RsiMeanReversion()]
+    if include_llm:
+        # Imported lazily so the default preview never needs the anthropic SDK.
+        from src.strategy.llm.strategy import LlmStrategy
+
+        strategies.append(LlmStrategy())
+    return strategies
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -48,6 +54,11 @@ def main(argv: list[str] | None = None) -> int:
         type=int,
         default=250,
         help="Number of recent bars to fetch.",
+    )
+    parser.add_argument(
+        "--llm",
+        action="store_true",
+        help="Also query the optional LLM strategy (needs ANTHROPIC_API_KEY).",
     )
     args = parser.parse_args(argv)
 
@@ -77,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  Last close      : {last['Close']:.2f}")
 
     print("\n--- Signals ---")
-    for strat in _build_strategies():
+    for strat in _build_strategies(args.llm):
         sig = strat.generate_signals(bars)
         print(
             f"  {strat.name:<26} {sig.action.value:<5} "

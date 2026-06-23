@@ -1,0 +1,42 @@
+# Enable with: pre-commit install   (installs both pre-commit and commit-msg hooks)
+default_install_hook_types: [pre-commit, commit-msg]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: detect-private-key
+
+  # ruff runs as a local hook so pre-commit and CI use the same ruff that the
+  # project pins in requirements-dev.txt, which keeps formatting in lockstep.
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: ruff (lint)
+        entry: ruff check --fix
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      - id: ruff-format
+        name: ruff (format)
+        entry: ruff format
+        language: system
+        types_or: [python, pyi]
+        require_serial: true
+      - id: no-emdash
+        name: no em dash in docs or source
+        entry: python3 scripts/check_no_emdash.py
+        language: system
+        types_or: [markdown, text, python]
+      - id: strip-ai-attribution
+        name: strip AI attribution from commit message
+        entry: scripts/strip_ai_attribution.sh
+        language: system
+        stages: [commit-msg]

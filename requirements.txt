@@ -10,7 +10,7 @@ alpaca-py>=0.33,<1
 # --- Phase 2: market data + strategy/indicators ---
 yfinance>=0.2.40,<1
 pandas>=2.2,<3
-numpy>=1.26,<3
+numpy>=2.4.6,<3
 pyarrow>=15
 
 # --- Phase 3: backtesting engine ---

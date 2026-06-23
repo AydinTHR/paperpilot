@@ -48,9 +48,7 @@ class MarketDataProvider(Protocol):
         interval: str = "1d",
     ) -> pd.DataFrame: ...
 
-    def get_latest_bars(
-        self, symbol: str, lookback: int, interval: str = "1d"
-    ) -> pd.DataFrame: ...
+    def get_latest_bars(self, symbol: str, lookback: int, interval: str = "1d") -> pd.DataFrame: ...
 
 
 def _normalize(df: pd.DataFrame) -> pd.DataFrame:
@@ -71,9 +69,7 @@ def _normalize(df: pd.DataFrame) -> pd.DataFrame:
 
     missing = [c for c in OHLCV_COLUMNS if c not in out.columns]
     if missing:
-        raise ValueError(
-            f"data missing required column(s) {missing}; got {list(out.columns)}"
-        )
+        raise ValueError(f"data missing required column(s) {missing}; got {list(out.columns)}")
 
     out = out.loc[:, list(OHLCV_COLUMNS)]
     out.index = pd.to_datetime(out.index)
@@ -123,14 +119,10 @@ class YFinanceProvider:
             multi_level_index=False,
         )
         df = _normalize(raw)
-        logger.info(
-            "Fetched %d %s bars for %s [%s..%s].", len(df), interval, symbol, start, end
-        )
+        logger.info("Fetched %d %s bars for %s [%s..%s].", len(df), interval, symbol, start, end)
         return df
 
-    def get_latest_bars(
-        self, symbol: str, lookback: int, interval: str = "1d"
-    ) -> pd.DataFrame:
+    def get_latest_bars(self, symbol: str, lookback: int, interval: str = "1d") -> pd.DataFrame:
         """Return roughly the most recent ``lookback`` bars, using the cache.
 
         Cache file: ``{data_cache_dir}/{SYMBOL}_{interval}.parquet``. When the
@@ -212,7 +204,6 @@ class YFinanceProvider:
     def _validate_interval(interval: str) -> str:
         if interval not in SUPPORTED_INTERVALS:
             raise ValueError(
-                f"interval {interval!r} not supported; "
-                f"choose from {list(SUPPORTED_INTERVALS)}."
+                f"interval {interval!r} not supported; choose from {list(SUPPORTED_INTERVALS)}."
             )
         return interval

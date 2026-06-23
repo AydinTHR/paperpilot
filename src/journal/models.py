@@ -72,7 +72,4 @@ class EquitySnapshot(Base):
     halt_reason: Mapped[str] = mapped_column(String(64), default="")
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
-        return (
-            f"EquitySnapshot(ts={self.ts!r}, equity={self.equity}, "
-            f"halted={self.halted})"
-        )
+        return f"EquitySnapshot(ts={self.ts!r}, equity={self.equity}, halted={self.halted})"

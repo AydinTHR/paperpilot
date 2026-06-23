@@ -13,7 +13,7 @@ from pathlib import Path
 
 from sqlalchemy import Engine, create_engine, func, select
 from sqlalchemy.engine import make_url
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from config.logging_config import get_logger
@@ -55,9 +55,7 @@ class Journal:
         self.db_url = db_url
         self._engine = engine or _build_engine(db_url)
         Base.metadata.create_all(self._engine)
-        self._session_factory = sessionmaker(
-            bind=self._engine, expire_on_commit=False
-        )
+        self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
         logger.info("Trade journal ready at %s", db_url)
 
     # --- writers -------------------------------------------------------------
@@ -160,10 +158,7 @@ class Journal:
             return {
                 "signals": session.scalar(select(func.count(SignalRecord.id))) or 0,
                 "orders": session.scalar(select(func.count(OrderRecord.id))) or 0,
-                "equity_snapshots": session.scalar(
-                    select(func.count(EquitySnapshot.id))
-                )
-                or 0,
+                "equity_snapshots": session.scalar(select(func.count(EquitySnapshot.id))) or 0,
             }
 
     def close(self) -> None:

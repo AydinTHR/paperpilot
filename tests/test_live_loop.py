@@ -37,9 +37,14 @@ class _FakeBroker:
 
     def get_account(self) -> AccountSnapshot:
         return AccountSnapshot(
-            account_number="TEST", status="ACTIVE", currency="USD",
-            cash=self.cash, equity=self.equity, buying_power=self.cash * 2,
-            portfolio_value=self.equity, pattern_day_trader=False,
+            account_number="TEST",
+            status="ACTIVE",
+            currency="USD",
+            cash=self.cash,
+            equity=self.equity,
+            buying_power=self.cash * 2,
+            portfolio_value=self.equity,
+            pattern_day_trader=False,
         )
 
     def get_positions(self) -> list[PositionInfo]:
@@ -47,9 +52,14 @@ class _FakeBroker:
 
     def place_market_order(self, symbol: str, qty: float, side: str) -> OrderInfo:
         order = OrderInfo(
-            id=f"ord-{len(self.orders) + 1}", symbol=symbol.upper(), qty=qty,
-            side=side, order_type="market", status="accepted",
-            filled_qty=0.0, filled_avg_price=None,
+            id=f"ord-{len(self.orders) + 1}",
+            symbol=symbol.upper(),
+            qty=qty,
+            side=side,
+            order_type="market",
+            status="accepted",
+            filled_qty=0.0,
+            filled_avg_price=None,
         )
         self.orders.append(order)
         return order
@@ -91,17 +101,27 @@ def _bars(n: int = 60, last_close: float = 100.0) -> pd.DataFrame:
     idx = pd.date_range("2026-01-01", periods=n, freq="B")
     close = np.full(n, last_close, dtype=float)
     return pd.DataFrame(
-        {"Open": close, "High": close * 1.01, "Low": close * 0.99,
-         "Close": close, "Volume": 1_000_000},
+        {
+            "Open": close,
+            "High": close * 1.01,
+            "Low": close * 0.99,
+            "Close": close,
+            "Volume": 1_000_000,
+        },
         index=idx,
     )
 
 
 def _position(symbol: str, qty: float, entry: float, price: float) -> PositionInfo:
     return PositionInfo(
-        symbol=symbol.upper(), qty=qty, side="long", avg_entry_price=entry,
-        current_price=price, market_value=qty * price,
-        unrealized_pl=(price - entry) * qty, unrealized_plpc=0.0,
+        symbol=symbol.upper(),
+        qty=qty,
+        side="long",
+        avg_entry_price=entry,
+        current_price=price,
+        market_value=qty * price,
+        unrealized_pl=(price - entry) * qty,
+        unrealized_plpc=0.0,
     )
 
 
@@ -125,8 +145,10 @@ def _loop(broker, provider, strategy, *, symbols, starting_equity=100_000.0, jou
 def test_hold_places_no_order() -> None:
     broker = _FakeBroker(equity=100_000.0, cash=100_000.0)
     loop = _loop(
-        broker, _FakeProvider(_bars()),
-        _StubStrategy(Signal(Action.HOLD, reason="flat")), symbols=["AAPL"],
+        broker,
+        _FakeProvider(_bars()),
+        _StubStrategy(Signal(Action.HOLD, reason="flat")),
+        symbols=["AAPL"],
     )
     result = loop.run_once(now=NOW)
 
@@ -139,8 +161,10 @@ def test_hold_places_no_order() -> None:
 def test_buy_signal_places_risk_sized_order() -> None:
     broker = _FakeBroker(equity=100_000.0, cash=100_000.0)
     loop = _loop(
-        broker, _FakeProvider(_bars(last_close=100.0)),
-        _StubStrategy(Signal(Action.BUY, confidence=0.6, reason="cross")), symbols=["AAPL"],
+        broker,
+        _FakeProvider(_bars(last_close=100.0)),
+        _StubStrategy(Signal(Action.BUY, confidence=0.6, reason="cross")),
+        symbols=["AAPL"],
     )
     result = loop.run_once(now=NOW)
 
@@ -158,12 +182,15 @@ def test_buy_signal_places_risk_sized_order() -> None:
 
 def test_buy_when_already_holding_is_noop() -> None:
     broker = _FakeBroker(
-        equity=100_000.0, cash=100_000.0,
+        equity=100_000.0,
+        cash=100_000.0,
         positions=[_position("AAPL", qty=50, entry=90.0, price=100.0)],
     )
     loop = _loop(
-        broker, _FakeProvider(_bars(last_close=100.0)),
-        _StubStrategy(Signal(Action.BUY, reason="cross")), symbols=["AAPL"],
+        broker,
+        _FakeProvider(_bars(last_close=100.0)),
+        _StubStrategy(Signal(Action.BUY, reason="cross")),
+        symbols=["AAPL"],
     )
     result = loop.run_once(now=NOW)
 
@@ -173,12 +200,15 @@ def test_buy_when_already_holding_is_noop() -> None:
 
 def test_sell_signal_closes_position() -> None:
     broker = _FakeBroker(
-        equity=100_000.0, cash=50_000.0,
+        equity=100_000.0,
+        cash=50_000.0,
         positions=[_position("AAPL", qty=50, entry=90.0, price=100.0)],
     )
     loop = _loop(
-        broker, _FakeProvider(_bars(last_close=100.0)),
-        _StubStrategy(Signal(Action.SELL, reason="death cross")), symbols=["AAPL"],
+        broker,
+        _FakeProvider(_bars(last_close=100.0)),
+        _StubStrategy(Signal(Action.SELL, reason="death cross")),
+        symbols=["AAPL"],
     )
     result = loop.run_once(now=NOW)
 
@@ -190,8 +220,10 @@ def test_sell_signal_closes_position() -> None:
 def test_sell_when_flat_is_noop() -> None:
     broker = _FakeBroker(equity=100_000.0, cash=100_000.0)
     loop = _loop(
-        broker, _FakeProvider(_bars()),
-        _StubStrategy(Signal(Action.SELL, reason="death cross")), symbols=["AAPL"],
+        broker,
+        _FakeProvider(_bars()),
+        _StubStrategy(Signal(Action.SELL, reason="death cross")),
+        symbols=["AAPL"],
     )
     result = loop.run_once(now=NOW)
 
@@ -202,12 +234,15 @@ def test_sell_when_flat_is_noop() -> None:
 def test_stop_loss_closes_before_signal() -> None:
     # Holding from 100; stop_loss_pct 0.05 -> stop 95; last close 90 -> breached.
     broker = _FakeBroker(
-        equity=95_000.0, cash=0.0,
+        equity=95_000.0,
+        cash=0.0,
         positions=[_position("AAPL", qty=50, entry=100.0, price=90.0)],
     )
     loop = _loop(
-        broker, _FakeProvider(_bars(last_close=90.0)),
-        _StubStrategy(Signal(Action.BUY, reason="ignored")), symbols=["AAPL"],
+        broker,
+        _FakeProvider(_bars(last_close=90.0)),
+        _StubStrategy(Signal(Action.BUY, reason="ignored")),
+        symbols=["AAPL"],
     )
     result = loop.run_once(now=NOW)
 
@@ -222,12 +257,15 @@ def test_stop_loss_closes_before_signal() -> None:
 
 def test_halt_flattens_and_blocks_entries() -> None:
     broker = _FakeBroker(
-        equity=100_000.0, cash=100_000.0,
+        equity=100_000.0,
+        cash=100_000.0,
         positions=[_position("AAPL", qty=50, entry=90.0, price=100.0)],
     )
     loop = _loop(
-        broker, _FakeProvider(_bars()),
-        _StubStrategy(Signal(Action.BUY, reason="would-buy")), symbols=["AAPL"],
+        broker,
+        _FakeProvider(_bars()),
+        _StubStrategy(Signal(Action.BUY, reason="would-buy")),
+        symbols=["AAPL"],
     )
     # Peak was 200k; equity now 100k -> 50% drawdown >> 20% limit -> halt.
     loop.risk.seed_peak(200_000.0)
@@ -245,8 +283,10 @@ def test_halt_flattens_and_blocks_entries() -> None:
 def test_insufficient_bars_skips() -> None:
     broker = _FakeBroker(equity=100_000.0, cash=100_000.0)
     loop = _loop(
-        broker, _FakeProvider(_bars(n=10)),
-        _StubStrategy(Signal(Action.BUY, reason="cross"), min_bars=60), symbols=["AAPL"],
+        broker,
+        _FakeProvider(_bars(n=10)),
+        _StubStrategy(Signal(Action.BUY, reason="cross"), min_bars=60),
+        symbols=["AAPL"],
     )
     result = loop.run_once(now=NOW)
 
@@ -258,8 +298,10 @@ def test_insufficient_bars_skips() -> None:
 def test_equity_snapshot_recorded() -> None:
     broker = _FakeBroker(equity=123_456.0, cash=100_000.0)
     loop = _loop(
-        broker, _FakeProvider(_bars()),
-        _StubStrategy(Signal(Action.HOLD)), symbols=["AAPL"],
+        broker,
+        _FakeProvider(_bars()),
+        _StubStrategy(Signal(Action.HOLD)),
+        symbols=["AAPL"],
     )
     loop.run_once(now=NOW)
     snaps = loop.journal.recent_equity()
@@ -273,8 +315,10 @@ def test_cash_budget_decrements_across_symbols() -> None:
     broker = _FakeBroker(equity=100_000.0, cash=150.0)
     frames = {"AAA": _bars(last_close=100.0), "BBB": _bars(last_close=100.0)}
     loop = _loop(
-        broker, _FakeProvider(frames),
-        _StubStrategy(Signal(Action.BUY, reason="cross")), symbols=["AAA", "BBB"],
+        broker,
+        _FakeProvider(frames),
+        _StubStrategy(Signal(Action.BUY, reason="cross")),
+        symbols=["AAA", "BBB"],
     )
     result = loop.run_once(now=NOW)
 
@@ -293,9 +337,14 @@ def test_from_settings_rejects_zero_equity(monkeypatch) -> None:
 
         def get_account(self) -> AccountSnapshot:
             return AccountSnapshot(
-                account_number="TEST", status="ACTIVE", currency="USD",
-                cash=0.0, equity=0.0, buying_power=0.0,
-                portfolio_value=0.0, pattern_day_trader=False,
+                account_number="TEST",
+                status="ACTIVE",
+                currency="USD",
+                cash=0.0,
+                equity=0.0,
+                buying_power=0.0,
+                portfolio_value=0.0,
+                pattern_day_trader=False,
             )
 
     # Patch the broker + data provider the factory builds so no network/SDK runs.

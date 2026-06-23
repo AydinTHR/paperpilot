@@ -145,9 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     risk = RiskManager.from_settings(settings, config.cash) if args.risk else None
 
     try:
-        result = run_backtest(
-            bars, strategy, config, symbol=symbol, interval=interval, risk=risk
-        )
+        result = run_backtest(bars, strategy, config, symbol=symbol, interval=interval, risk=risk)
     except Exception as exc:  # noqa: BLE001
         print(f"\n[backtest FAILED] {exc}\n")
         logger.error("Backtest failed: %s", exc)

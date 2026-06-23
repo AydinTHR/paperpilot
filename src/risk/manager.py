@@ -81,9 +81,7 @@ class RiskManager:
 
     def __init__(self, limits: RiskLimits, starting_equity: float) -> None:
         if starting_equity <= 0:
-            raise ValueError(
-                f"starting_equity must be positive, got {starting_equity}"
-            )
+            raise ValueError(f"starting_equity must be positive, got {starting_equity}")
         self.limits = limits
         self._peak_equity = starting_equity
         self._current_day: date | None = None
@@ -145,9 +143,7 @@ class RiskManager:
 
     # --- halts ---------------------------------------------------------------
 
-    def update_equity(
-        self, equity: float, *, now: datetime | date | None = None
-    ) -> None:
+    def update_equity(self, equity: float, *, now: datetime | date | None = None) -> None:
         """Feed the latest equity reading; updates peaks and trips halts.
 
         Call this once per bar (backtest) or per loop tick (live) *before*

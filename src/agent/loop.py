@@ -242,7 +242,9 @@ class TradingLoop:
         )
 
         if signal.action is Action.BUY and not holding:
-            return self._try_enter(symbol, price, equity, cash, signal.size_hint, signal.reason, now)
+            return self._try_enter(
+                symbol, price, equity, cash, signal.size_hint, signal.reason, now
+            )
 
         if signal.action is Action.SELL and holding:
             self.broker.close_position(symbol)
@@ -254,9 +256,7 @@ class TradingLoop:
                 reason="signal SELL",
                 ts=now,
             )
-            return SymbolOutcome(
-                symbol, "SELL", signal.reason, qty=position.qty, price=price
-            )
+            return SymbolOutcome(symbol, "SELL", signal.reason, qty=position.qty, price=price)
 
         return SymbolOutcome(symbol, "HOLD", signal.reason or signal.action.value, price=price)
 
@@ -289,9 +289,7 @@ class TradingLoop:
             reason="signal BUY",
             ts=now,
         )
-        return SymbolOutcome(
-            symbol, "BUY", reason, qty=qty, price=price, order_id=order.id
-        )
+        return SymbolOutcome(symbol, "BUY", reason, qty=qty, price=price, order_id=order.id)
 
     def _flatten_all(
         self,
@@ -312,9 +310,7 @@ class TradingLoop:
                 reason=f"halt: {halt_reason}",
                 ts=now,
             )
-            outcomes.append(
-                SymbolOutcome(symbol, "FLATTEN", halt_reason, qty=pos.qty)
-            )
+            outcomes.append(SymbolOutcome(symbol, "FLATTEN", halt_reason, qty=pos.qty))
         return outcomes
 
     # --- scheduled mode ------------------------------------------------------

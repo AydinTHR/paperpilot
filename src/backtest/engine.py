@@ -51,9 +51,7 @@ class BacktestConfig:
         if not 0 <= self.slippage < 1:
             raise ValueError(f"slippage must be in [0, 1), got {self.slippage}")
         if not 0 < self.position_size < 1:
-            raise ValueError(
-                f"position_size must be in (0, 1), got {self.position_size}"
-            )
+            raise ValueError(f"position_size must be in (0, 1), got {self.position_size}")
 
 
 @dataclass(frozen=True)
@@ -201,8 +199,7 @@ def run_backtest(
     elif config.slippage:
         bt_kwargs["commission"] = config.commission + config.slippage
         logger.info(
-            "backtesting.py lacks 'spread'; folding slippage into commission "
-            "(%.4f + %.4f).",
+            "backtesting.py lacks 'spread'; folding slippage into commission (%.4f + %.4f).",
             config.commission,
             config.slippage,
         )

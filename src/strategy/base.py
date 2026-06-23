@@ -57,9 +57,7 @@ class Signal:
         if not 0.0 <= self.confidence <= 1.0:
             raise ValueError(f"confidence must be in [0, 1], got {self.confidence!r}")
         if self.size_hint is not None and not 0.0 <= self.size_hint <= 1.0:
-            raise ValueError(
-                f"size_hint must be in [0, 1] or None, got {self.size_hint!r}"
-            )
+            raise ValueError(f"size_hint must be in [0, 1] or None, got {self.size_hint!r}")
 
 
 class Strategy(ABC):

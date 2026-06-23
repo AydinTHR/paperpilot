@@ -81,19 +81,13 @@ def main(argv: list[str] | None = None) -> int:
 
     last = bars.iloc[-1]
     print(f"\n--- {symbol} ({interval}) ---")
-    print(
-        f"  Bars            : {len(bars)}  "
-        f"({bars.index[0].date()} .. {bars.index[-1].date()})"
-    )
+    print(f"  Bars            : {len(bars)}  ({bars.index[0].date()} .. {bars.index[-1].date()})")
     print(f"  Last close      : {last['Close']:.2f}")
 
     print("\n--- Signals ---")
     for strat in _build_strategies(args.llm):
         sig = strat.generate_signals(bars)
-        print(
-            f"  {strat.name:<26} {sig.action.value:<5} "
-            f"conf={sig.confidence:0.2f}  {sig.reason}"
-        )
+        print(f"  {strat.name:<26} {sig.action.value:<5} conf={sig.confidence:0.2f}  {sig.reason}")
     print()
     logger.info("Previewed signals for %s (%s, %d bars).", symbol, interval, len(bars))
     return 0

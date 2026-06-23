@@ -40,9 +40,7 @@ class RsiMeanReversion(Strategy):
     def generate_signals(self, data: pd.DataFrame) -> Signal:
         self._check(data)
         if not self._has_enough_bars(data):
-            return self.hold(
-                reason=f"warming up: need {self.min_bars} bars, have {len(data)}"
-            )
+            return self.hold(reason=f"warming up: need {self.min_bars} bars, have {len(data)}")
 
         latest = rsi(data["Close"], self.period).iloc[-1]
         if pd.isna(latest):
@@ -56,9 +54,7 @@ class RsiMeanReversion(Strategy):
                 reason=f"oversold: RSI {latest:.1f} < {self.oversold:.0f}",
             )
         if latest > self.overbought:
-            confidence = min(
-                (latest - self.overbought) / (100.0 - self.overbought), 1.0
-            )
+            confidence = min((latest - self.overbought) / (100.0 - self.overbought), 1.0)
             return Signal(
                 Action.SELL,
                 confidence=confidence,

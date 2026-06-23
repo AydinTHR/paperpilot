@@ -51,8 +51,13 @@ def _bars(n: int = 120, trend: float = 0.0, start: float = 100.0) -> pd.DataFram
     idx = pd.date_range("2026-01-01", periods=n, freq="B")
     close = np.maximum(start + np.arange(n) * trend, 1.0)
     return pd.DataFrame(
-        {"Open": close, "High": close * 1.01, "Low": close * 0.99,
-         "Close": close, "Volume": 1_000_000},
+        {
+            "Open": close,
+            "High": close * 1.01,
+            "Low": close * 0.99,
+            "Close": close,
+            "Volume": 1_000_000,
+        },
         index=idx,
     )
 

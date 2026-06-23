@@ -50,9 +50,7 @@ def cmd_check(settings: Settings) -> int:
     print(f"  Cash            : {_fmt_money(account.cash, account.currency)}")
     print(f"  Equity          : {_fmt_money(account.equity, account.currency)}")
     print(f"  Buying power    : {_fmt_money(account.buying_power, account.currency)}")
-    print(
-        f"  Portfolio value : {_fmt_money(account.portfolio_value, account.currency)}"
-    )
+    print(f"  Portfolio value : {_fmt_money(account.portfolio_value, account.currency)}")
 
     print(f"\n--- Positions ({len(positions)}) ---")
     if not positions:
@@ -94,8 +92,10 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_check(settings)
 
     parser.print_help()
-    print("\nUse --check for a connection test, or run the trading loop with "
-          "scripts/run_live.py (--once / --interval MIN / --report).")
+    print(
+        "\nUse --check for a connection test, or run the trading loop with "
+        "scripts/run_live.py (--once / --interval MIN / --report)."
+    )
     return 0
 
 

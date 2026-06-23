@@ -80,9 +80,7 @@ def _print_report(journal: Journal, limit: int) -> None:
         print("    (none)")
     for s in signals:
         ts = s.ts.isoformat(timespec="seconds") if s.ts else "?"
-        print(
-            f"    {ts}  {s.symbol:<6} {s.action:<4} conf={s.confidence:.2f}  {s.reason}"
-        )
+        print(f"    {ts}  {s.symbol:<6} {s.action:<4} conf={s.confidence:.2f}  {s.reason}")
 
     equity = journal.recent_equity(limit)
     print(f"\n  Recent equity ({len(equity)}):")
@@ -147,9 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     strategy_key = args.strategy or settings.default_strategy
     strategy = _STRATEGIES[strategy_key]()
     symbols = (
-        [s.strip().upper() for s in args.symbols.split(",") if s.strip()]
-        if args.symbols
-        else None
+        [s.strip().upper() for s in args.symbols.split(",") if s.strip()] if args.symbols else None
     )
 
     try:

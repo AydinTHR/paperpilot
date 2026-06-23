@@ -24,9 +24,7 @@ DISCLAIMER_BANNER = r"""
   Not financial advice. Past or simulated performance does not predict
   future results. Use entirely at your own risk.
 ============================================================================
-""".strip(
-    "\n"
-)
+""".strip("\n")
 
 # Printed ONLY when real-money trading has been deliberately enabled.
 LIVE_TRADING_WARNING = r"""
@@ -41,9 +39,7 @@ LIVE_TRADING_WARNING = r"""
 !!   Press Ctrl-C now if this was not intentional.                        !!
 !!                                                                        !!
 !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-""".strip(
-    "\n"
-)
+""".strip("\n")
 
 
 class Settings(BaseSettings):
@@ -136,9 +132,7 @@ class Settings(BaseSettings):
         default="claude-3-5-haiku-latest",
         description="Model name passed to the LLM provider (override per provider).",
     )
-    llm_max_tokens: int = Field(
-        default=512, gt=0, description="Max tokens for the LLM response."
-    )
+    llm_max_tokens: int = Field(default=512, gt=0, description="Max tokens for the LLM response.")
     llm_temperature: float = Field(
         default=0.0,
         ge=0,
@@ -169,9 +163,7 @@ class Settings(BaseSettings):
         interval = v.strip().lower()
         allowed = {"1d", "1h"}
         if interval not in allowed:
-            raise ValueError(
-                f"DEFAULT_INTERVAL must be one of {sorted(allowed)}, got {v!r}"
-            )
+            raise ValueError(f"DEFAULT_INTERVAL must be one of {sorted(allowed)}, got {v!r}")
         return interval
 
     @field_validator("default_strategy")
@@ -180,9 +172,7 @@ class Settings(BaseSettings):
         strategy = v.strip().lower()
         allowed = {"sma", "rsi", "llm"}
         if strategy not in allowed:
-            raise ValueError(
-                f"DEFAULT_STRATEGY must be one of {sorted(allowed)}, got {v!r}"
-            )
+            raise ValueError(f"DEFAULT_STRATEGY must be one of {sorted(allowed)}, got {v!r}")
         return strategy
 
     @field_validator("llm_provider")
@@ -191,9 +181,7 @@ class Settings(BaseSettings):
         provider = v.strip().lower()
         allowed = {"anthropic", "openai"}
         if provider not in allowed:
-            raise ValueError(
-                f"LLM_PROVIDER must be one of {sorted(allowed)}, got {v!r}"
-            )
+            raise ValueError(f"LLM_PROVIDER must be one of {sorted(allowed)}, got {v!r}")
         return provider
 
     @model_validator(mode="after")

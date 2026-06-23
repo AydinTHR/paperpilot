@@ -32,9 +32,7 @@ class SmaCrossover(Strategy):
     def generate_signals(self, data: pd.DataFrame) -> Signal:
         self._check(data)
         if not self._has_enough_bars(data):
-            return self.hold(
-                reason=f"warming up: need {self.min_bars} bars, have {len(data)}"
-            )
+            return self.hold(reason=f"warming up: need {self.min_bars} bars, have {len(data)}")
 
         close = data["Close"]
         fast_sma = sma(close, self.fast)
@@ -57,8 +55,7 @@ class SmaCrossover(Strategy):
                 Action.BUY,
                 confidence=confidence,
                 reason=(
-                    f"golden cross: SMA{self.fast} {fast_now:.2f} "
-                    f"> SMA{self.slow} {slow_now:.2f}"
+                    f"golden cross: SMA{self.fast} {fast_now:.2f} > SMA{self.slow} {slow_now:.2f}"
                 ),
             )
         if crossed_down:
@@ -66,8 +63,7 @@ class SmaCrossover(Strategy):
                 Action.SELL,
                 confidence=confidence,
                 reason=(
-                    f"death cross: SMA{self.fast} {fast_now:.2f} "
-                    f"< SMA{self.slow} {slow_now:.2f}"
+                    f"death cross: SMA{self.fast} {fast_now:.2f} < SMA{self.slow} {slow_now:.2f}"
                 ),
             )
         return self.hold(

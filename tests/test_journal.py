@@ -26,8 +26,13 @@ def test_signal_round_trip(tmp_path) -> None:
 def test_order_round_trip(tmp_path) -> None:
     journal = Journal(f"sqlite:///{tmp_path / 'j.db'}")
     journal.record_order(
-        symbol="msft", side="buy", qty=12, status="accepted",
-        broker_order_id="x1", reason="signal BUY", ts=_ts(),
+        symbol="msft",
+        side="buy",
+        qty=12,
+        status="accepted",
+        broker_order_id="x1",
+        reason="signal BUY",
+        ts=_ts(),
     )
     rows = journal.recent_orders()
     assert len(rows) == 1
@@ -68,8 +73,11 @@ def test_counts() -> None:
 def test_halt_fields_persist() -> None:
     journal = Journal("sqlite:///:memory:")
     journal.record_equity(
-        equity=80_000.0, cash=80_000.0, halted=True,
-        halt_reason="max-drawdown halt active", ts=_ts(),
+        equity=80_000.0,
+        cash=80_000.0,
+        halted=True,
+        halt_reason="max-drawdown halt active",
+        ts=_ts(),
     )
     row = journal.recent_equity()[0]
     assert row.halted is True

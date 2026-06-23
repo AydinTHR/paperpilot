@@ -216,9 +216,7 @@ class Broker:
         try:
             order = self._client.submit_order(order_data=request)
         except Exception as exc:  # noqa: BLE001
-            raise BrokerError(
-                f"Failed to submit {side} order for {qty} {symbol}: {exc}"
-            ) from exc
+            raise BrokerError(f"Failed to submit {side} order for {qty} {symbol}: {exc}") from exc
         logger.info("Submitted %s order: %s %s", side, qty, symbol)
         return self._to_order_info(order)
 
@@ -262,7 +260,5 @@ class Broker:
             order_type=_enum_val("order_type") or _enum_val("type"),
             status=_enum_val("status"),
             filled_qty=_to_float(getattr(order, "filled_qty", None)),
-            filled_avg_price=(
-                _to_float(filled_price) if filled_price is not None else None
-            ),
+            filled_avg_price=(_to_float(filled_price) if filled_price is not None else None),
         )

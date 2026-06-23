@@ -91,12 +91,14 @@ def test_position_size_bounded_by_cash() -> None:
 
 @pytest.mark.parametrize(
     "equity,price,cash",
-    [(0.0, 100.0, 10_000.0), (10_000.0, 0.0, 10_000.0), (10_000.0, 100.0, 0.0),
-     (10_000.0, -5.0, 10_000.0)],
+    [
+        (0.0, 100.0, 10_000.0),
+        (10_000.0, 0.0, 10_000.0),
+        (10_000.0, 100.0, 0.0),
+        (10_000.0, -5.0, 10_000.0),
+    ],
 )
-def test_position_size_zero_on_degenerate_inputs(
-    equity: float, price: float, cash: float
-) -> None:
+def test_position_size_zero_on_degenerate_inputs(equity: float, price: float, cash: float) -> None:
     rm = RiskManager(_limits(), 10_000.0)
     assert rm.position_size(equity, price, cash) == 0
 

@@ -111,6 +111,4 @@ def build_llm_client(settings: Settings, *, client: LlmClient | None = None) -> 
 
     # Provider-agnostic by design: the protocol + factory make another backend
     # (e.g. OpenAI) a drop-in. It just isn't wired yet.
-    raise LlmError(
-        f"LLM provider {provider!r} is not wired yet; set LLM_PROVIDER=anthropic."
-    )
+    raise LlmError(f"LLM provider {provider!r} is not wired yet; set LLM_PROVIDER=anthropic.")

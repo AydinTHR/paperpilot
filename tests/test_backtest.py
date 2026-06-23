@@ -140,9 +140,7 @@ def test_backtest_with_risk_reduces_drawdown() -> None:
 
     base = run_backtest(df, SmaCrossover(), config, symbol="TEST", interval="1d")
     risk = RiskManager(limits, starting_equity=config.cash)
-    risked = run_backtest(
-        df, SmaCrossover(), config, symbol="TEST", interval="1d", risk=risk
-    )
+    risked = run_backtest(df, SmaCrossover(), config, symbol="TEST", interval="1d", risk=risk)
 
     # Drawdowns are <= 0; capping exposure at 10% (vs the default 95%) plus the
     # stop-loss can only pull the worst drawdown closer to zero, never deeper.

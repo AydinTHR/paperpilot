@@ -82,9 +82,7 @@ class LlmStrategy(Strategy):
     def generate_signals(self, data: pd.DataFrame) -> Signal:
         self._check(data)
         if not self._has_enough_bars(data):
-            return self.hold(
-                reason=f"warming up: need {self.min_bars} bars, have {len(data)}"
-            )
+            return self.hold(reason=f"warming up: need {self.min_bars} bars, have {len(data)}")
         if self._client is None:
             return self.hold(reason=f"LLM unavailable: {self._unavailable}")
 

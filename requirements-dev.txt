@@ -7,5 +7,5 @@ pytest-cov>=5,<7
 # Lint + format. Pinned to one minor so pre-commit and CI format identically.
 ruff>=0.15,<0.16
 
-# Local git hooks (em-dash guard + commit-msg cleaner + ruff).
+# Local git hooks (pre-commit running ruff + standard checks).
 pre-commit>=3.7,<5

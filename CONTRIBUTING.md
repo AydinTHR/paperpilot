@@ -35,12 +35,6 @@ drives the changelog and the version bump.
 Subjects are short and in the imperative mood, for example
 `feat(auth): add token refresh`.
 
-## House rules
-
-- No em dashes anywhere in the project, the README most of all. A local check fails
-  the commit if one slips in. Use a comma, a colon, parentheses, or two sentences.
-- Commit messages carry no AI or tool attribution. A local hook strips it as a backstop.
-
 ## Code style
 
 Formatting and linting are enforced by pre-commit, so you do not need to format by

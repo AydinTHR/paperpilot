@@ -109,8 +109,8 @@ list with defaults.
 ## Development
 
 ```bash
-pre-commit install                       # enables the local checks and commit-msg hook
-pre-commit run --all-files               # lint, format, and the house-rule checks
+pre-commit install                       # enables the local pre-commit checks
+pre-commit run --all-files               # run lint and format checks
 pytest                                   # run the test suite (network tests deselected)
 ```
 

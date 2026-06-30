@@ -8,7 +8,7 @@ python-dotenv>=1.0,<2
 alpaca-py>=0.33,<1
 
 # --- Phase 2: market data + strategy/indicators ---
-yfinance>=0.2.40,<1
+yfinance>=1.5.1,<2
 pandas>=2.2,<3
 numpy>=2.4.6,<3
 pyarrow>=15

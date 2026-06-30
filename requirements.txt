@@ -4,7 +4,7 @@
 # --- Phase 1: config, validation, broker ---
 pydantic>=2.13.4,<3
 pydantic-settings>=2.14.2,<3
-python-dotenv>=1.0,<2
+python-dotenv>=1.2.2,<2
 alpaca-py>=0.33,<1
 
 # --- Phase 2: market data + strategy/indicators ---

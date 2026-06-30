@@ -4,11 +4,11 @@
 # --- Phase 1: config, validation, broker ---
 pydantic>=2.13.4,<3
 pydantic-settings>=2.14.2,<3
-python-dotenv>=1.0,<2
+python-dotenv>=1.2.2,<2
 alpaca-py>=0.33,<1
 
 # --- Phase 2: market data + strategy/indicators ---
-yfinance>=0.2.40,<1
+yfinance>=1.5.1,<2
 pandas>=2.2,<3
 numpy>=2.4.6,<3
 pyarrow>=15
@@ -22,4 +22,4 @@ APScheduler>=3.10,<4
 
 # --- Phase 6: optional LLM signal layer (provider-agnostic; Claude adapter) ---
 # Soft dependency: imported lazily, only when the LLM strategy is used with a key.
-anthropic>=0.39,<1
+anthropic>=0.113.0,<1

@@ -23,8 +23,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
+from typing import TYPE_CHECKING
 
 from config.logging_config import get_logger
+
+if TYPE_CHECKING:
+    from config.settings import Settings
 
 logger = get_logger(__name__)
 
@@ -39,7 +43,7 @@ class RiskLimits:
     stop_loss_pct: float
 
     @classmethod
-    def from_settings(cls, settings: object) -> RiskLimits:
+    def from_settings(cls, settings: Settings) -> RiskLimits:
         """Build limits from a ``config.settings.Settings`` instance."""
         return cls(
             max_position_pct=settings.max_position_pct,
@@ -90,7 +94,7 @@ class RiskManager:
         self._drawdown_halt = False
 
     @classmethod
-    def from_settings(cls, settings: object, starting_equity: float) -> RiskManager:
+    def from_settings(cls, settings: Settings, starting_equity: float) -> RiskManager:
         return cls(RiskLimits.from_settings(settings), starting_equity)
 
     def seed_peak(self, equity: float) -> None:

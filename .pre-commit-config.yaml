@@ -30,3 +30,10 @@ repos:
         language: system
         types_or: [python, pyi]
         require_serial: true
+      - id: mypy
+        name: mypy (type check)
+        entry: mypy
+        language: system
+        types_or: [python, pyi]
+        pass_filenames: false
+        require_serial: true

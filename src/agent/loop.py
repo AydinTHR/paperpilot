@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from config.logging_config import get_logger
 from config.settings import Settings, get_settings
@@ -28,6 +28,9 @@ from src.execution.broker import AccountSnapshot, Broker, BrokerError, OrderInfo
 from src.journal.store import Journal
 from src.risk.manager import RiskManager
 from src.strategy.base import Action, Strategy
+
+if TYPE_CHECKING:
+    import pandas as pd
 
 logger = get_logger(__name__)
 
@@ -42,7 +45,7 @@ class BrokerLike(Protocol):
 
 
 class DataProviderLike(Protocol):
-    def get_latest_bars(self, symbol: str, lookback: int, interval: str): ...
+    def get_latest_bars(self, symbol: str, lookback: int, interval: str) -> pd.DataFrame: ...
 
 
 @dataclass(frozen=True)
@@ -160,6 +163,7 @@ class TradingLoop:
 
         positions = {p.symbol.upper(): p for p in self.broker.get_positions()}
 
+        outcomes: list[SymbolOutcome] = []
         if halted:
             outcomes = self._flatten_all(positions, halt_reason, now)
             logger.warning(
@@ -169,7 +173,6 @@ class TradingLoop:
             )
             return LoopResult(now, equity, cash, True, halt_reason, outcomes)
 
-        outcomes: list[SymbolOutcome] = []
         available_cash = cash
         for symbol in self.symbols:
             outcome = self._process_symbol(
@@ -216,7 +219,11 @@ class TradingLoop:
         holding = position is not None and position.qty > 0
 
         # Live stop-loss: exit a losing position before considering any signal.
-        if holding and self.risk.stop_breached(position.avg_entry_price, price):
+        if (
+            holding
+            and position is not None
+            and self.risk.stop_breached(position.avg_entry_price, price)
+        ):
             self.broker.close_position(symbol)
             self.journal.record_order(
                 symbol=symbol,
@@ -246,7 +253,7 @@ class TradingLoop:
                 symbol, price, equity, cash, signal.size_hint, signal.reason, now
             )
 
-        if signal.action is Action.SELL and holding:
+        if signal.action is Action.SELL and holding and position is not None:
             self.broker.close_position(symbol)
             self.journal.record_order(
                 symbol=symbol,

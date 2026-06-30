@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TypeVar
 
 from sqlalchemy import Engine, create_engine, func, select
 from sqlalchemy.engine import make_url
@@ -22,6 +23,9 @@ from src.journal.models import Base, EquitySnapshot, OrderRecord, SignalRecord
 logger = get_logger(__name__)
 
 DEFAULT_DB_URL = "sqlite:///data/paperpilot.db"
+
+# Any journal table class. Bound to Base so readers keep their concrete row type.
+ModelT = TypeVar("ModelT", bound=Base)
 
 
 def _utcnow() -> datetime:
@@ -139,9 +143,11 @@ class Journal:
     def recent_equity(self, limit: int = 20) -> list[EquitySnapshot]:
         return self._recent(EquitySnapshot, limit)
 
-    def _recent(self, model: type, limit: int) -> list:
+    def _recent(self, model: type[ModelT], limit: int) -> list[ModelT]:
         with self._session_factory() as session:
-            stmt = select(model).order_by(model.id.desc()).limit(limit)
+            # Every journal table declares ``id``; mypy cannot see it through the
+            # generic ``type[ModelT]``, so this one access is annotated.
+            stmt = select(model).order_by(model.id.desc()).limit(limit)  # type: ignore[attr-defined]
             rows = list(session.scalars(stmt))
         rows.reverse()  # oldest-first for display
         return rows

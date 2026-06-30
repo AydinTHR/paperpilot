@@ -22,4 +22,4 @@ APScheduler>=3.10,<4
 
 # --- Phase 6: optional LLM signal layer (provider-agnostic; Claude adapter) ---
 # Soft dependency: imported lazily, only when the LLM strategy is used with a key.
-anthropic>=0.39,<1
+anthropic>=0.114.0,<1

@@ -20,14 +20,14 @@ import numpy as np
 # Make the project root importable when run as a plain script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from config.logging_config import get_logger, setup_logging  # noqa: E402
-from config.settings import get_settings  # noqa: E402
-from src.backtest.engine import BacktestConfig, BacktestResult, run_backtest  # noqa: E402
-from src.data.market_data import YFinanceProvider  # noqa: E402
-from src.risk.manager import RiskManager  # noqa: E402
-from src.strategy.base import Strategy  # noqa: E402
-from src.strategy.examples.mean_reversion import RsiMeanReversion  # noqa: E402
-from src.strategy.examples.sma_crossover import SmaCrossover  # noqa: E402
+from config.logging_config import get_logger, setup_logging
+from config.settings import get_settings
+from src.backtest.engine import BacktestConfig, BacktestResult, run_backtest
+from src.data.market_data import YFinanceProvider
+from src.risk.manager import RiskManager
+from src.strategy.base import Strategy
+from src.strategy.examples.mean_reversion import RsiMeanReversion
+from src.strategy.examples.sma_crossover import SmaCrossover
 
 logger = get_logger("paperpilot.backtest")
 
@@ -37,7 +37,7 @@ _STRATEGIES: dict[str, type[Strategy]] = {
 }
 
 
-def _sparkline(series: "object", width: int = 60) -> str:
+def _sparkline(series: object, width: int = 60) -> str:
     """Render a numeric series as a compact unicode block sparkline."""
     blocks = "▁▂▃▄▅▆▇█"
     values = np.asarray(series, dtype=float)
@@ -129,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
             bars = provider.get_bars(symbol, args.start, args.end, interval)
         else:
             bars = provider.get_latest_bars(symbol, lookback=args.lookback, interval=interval)
-    except Exception as exc:  # noqa: BLE001 - surface fetch failure cleanly
+    except Exception as exc:
         print(f"\n[backtest FAILED] could not fetch {symbol}: {exc}\n")
         logger.error("Fetch failed for %s: %s", symbol, exc)
         return 1
@@ -146,7 +146,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         result = run_backtest(bars, strategy, config, symbol=symbol, interval=interval, risk=risk)
-    except Exception as exc:  # noqa: BLE001
+    except Exception as exc:
         print(f"\n[backtest FAILED] {exc}\n")
         logger.error("Backtest failed: %s", exc)
         return 1

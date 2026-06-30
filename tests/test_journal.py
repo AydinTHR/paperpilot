@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from src.journal.store import Journal
 
 
 def _ts(minute: int = 0) -> datetime:
-    return datetime(2026, 5, 30, 14, 0, tzinfo=timezone.utc) + timedelta(minutes=minute)
+    return datetime(2026, 5, 30, 14, 0, tzinfo=UTC) + timedelta(minutes=minute)
 
 
 def test_signal_round_trip(tmp_path) -> None:

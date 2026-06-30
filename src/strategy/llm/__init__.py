@@ -19,6 +19,6 @@ __all__ = [
     "LlmClient",
     "LlmConfig",
     "LlmError",
-    "build_llm_client",
     "LlmStrategy",
+    "build_llm_client",
 ]

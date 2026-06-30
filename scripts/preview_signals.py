@@ -17,12 +17,12 @@ from pathlib import Path
 # Make the project root importable when run as a plain script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from config.logging_config import get_logger, setup_logging  # noqa: E402
-from config.settings import get_settings  # noqa: E402
-from src.data.market_data import YFinanceProvider  # noqa: E402
-from src.strategy.base import Strategy  # noqa: E402
-from src.strategy.examples.mean_reversion import RsiMeanReversion  # noqa: E402
-from src.strategy.examples.sma_crossover import SmaCrossover  # noqa: E402
+from config.logging_config import get_logger, setup_logging
+from config.settings import get_settings
+from src.data.market_data import YFinanceProvider
+from src.strategy.base import Strategy
+from src.strategy.examples.mean_reversion import RsiMeanReversion
+from src.strategy.examples.sma_crossover import SmaCrossover
 
 logger = get_logger("paperpilot.preview")
 
@@ -46,7 +46,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--interval",
         default=None,
-        choices=list(("1d", "1h")),
+        choices=["1d", "1h"],
         help="Bar interval (defaults to settings.default_interval).",
     )
     parser.add_argument(
@@ -70,7 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     provider = YFinanceProvider(settings)
     try:
         bars = provider.get_latest_bars(symbol, lookback=args.lookback, interval=interval)
-    except Exception as exc:  # noqa: BLE001 - surface any fetch failure cleanly
+    except Exception as exc:
         print(f"\n[preview FAILED] could not fetch {symbol}: {exc}\n")
         logger.error("Fetch failed for %s: %s", symbol, exc)
         return 1

@@ -15,7 +15,6 @@ from src.execution.broker import (
     _to_float,
 )
 
-
 # --- fakes -----------------------------------------------------------------
 
 
@@ -44,9 +43,9 @@ class _FakePosition:
 class _FakeOrder:
     def __init__(self, req: object) -> None:
         self.id = "order-1"
-        self.symbol = getattr(req, "symbol")
-        self.qty = getattr(req, "qty")
-        self.side = getattr(req, "side")  # OrderSide enum
+        self.symbol = req.symbol
+        self.qty = req.qty
+        self.side = req.side  # OrderSide enum
         self.order_type = "market"
         self.status = "accepted"
         self.filled_qty = "0"

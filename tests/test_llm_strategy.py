@@ -22,7 +22,6 @@ from src.strategy.llm.strategy import (
     _parse_signal,
 )
 
-
 # --- fakes / helpers --------------------------------------------------------
 
 

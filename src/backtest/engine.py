@@ -96,7 +96,7 @@ def _build_adapter(
     pp_strategy: Strategy,
     full_df: pd.DataFrame,
     default_size: float,
-    risk: "RiskManager | None" = None,
+    risk: RiskManager | None = None,
 ) -> type[BtStrategy]:
     """Create a ``backtesting.Strategy`` subclass that delegates to ``pp_strategy``.
 
@@ -111,7 +111,7 @@ def _build_adapter(
     """
 
     class _Adapter(BtStrategy):
-        def init(self) -> None:  # noqa: D401 - required by backtesting.py
+        def init(self) -> None:
             pass
 
         def next(self) -> None:
@@ -170,7 +170,7 @@ def run_backtest(
     *,
     symbol: str = "",
     interval: str = "",
-    risk: "RiskManager | None" = None,
+    risk: RiskManager | None = None,
 ) -> BacktestResult:
     """Backtest ``strategy`` over ``data`` (a normalised OHLCV frame).
 

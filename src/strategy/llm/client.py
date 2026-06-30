@@ -42,7 +42,7 @@ class LlmConfig:
     timeout_seconds: float = 30.0
 
     @classmethod
-    def from_settings(cls, settings: Settings) -> "LlmConfig":
+    def from_settings(cls, settings: Settings) -> LlmConfig:
         return cls(
             provider=settings.llm_provider,
             model=settings.llm_model,

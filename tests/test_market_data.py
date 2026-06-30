@@ -15,7 +15,6 @@ from config.settings import Settings
 from src.data.market_data import OHLCV_COLUMNS, YFinanceProvider, _normalize
 from src.data.universe import DEFAULT_UNIVERSE, get_universe
 
-
 # --- helpers ---------------------------------------------------------------
 
 

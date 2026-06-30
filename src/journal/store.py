@@ -8,7 +8,7 @@ supported for fast, isolated tests.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import Engine, create_engine, func, select
@@ -25,7 +25,7 @@ DEFAULT_DB_URL = "sqlite:///data/paperpilot.db"
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _build_engine(db_url: str) -> Engine:

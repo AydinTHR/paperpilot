@@ -11,9 +11,10 @@ The download callable is injectable, so tests run fully offline with a fake.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Protocol
 
 import pandas as pd
 
@@ -166,15 +167,15 @@ class YFinanceProvider:
     def _load_cache_if_fresh(self, path: Path, interval: str) -> pd.DataFrame | None:
         if not path.exists():
             return None
-        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
-        age = datetime.now(timezone.utc) - mtime
+        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
+        age = datetime.now(UTC) - mtime
         ttl = _CACHE_TTL.get(interval, timedelta(hours=12))
         if age > ttl:
             logger.info("Cache %s stale (age %s > ttl %s); refetching.", path, age, ttl)
             return None
         try:
             return _normalize(pd.read_parquet(path))
-        except Exception as exc:  # noqa: BLE001 - corrupt cache -> treat as miss
+        except Exception as exc:
             logger.warning("Could not read cache %s (%s); refetching.", path, exc)
             return None
 
@@ -183,7 +184,7 @@ class YFinanceProvider:
         try:
             df.to_parquet(path)
             logger.info("Wrote %d rows to cache %s.", len(df), path)
-        except Exception as exc:  # noqa: BLE001 - caching is best-effort
+        except Exception as exc:
             logger.warning("Could not write cache %s (%s).", path, exc)
 
     @staticmethod
@@ -193,7 +194,7 @@ class YFinanceProvider:
         Padded generously for weekends/holidays/non-trading hours; the caller
         trims to ``lookback`` afterwards.
         """
-        end = datetime.now(timezone.utc)
+        end = datetime.now(UTC)
         if interval == "1d":
             start = end - timedelta(days=int(lookback * 1.6) + 10)
         else:  # "1h": ~6.5 trading hours per day

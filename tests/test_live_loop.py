@@ -8,7 +8,7 @@ insufficient-bars skip -- without any network, SDK, or real money.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import numpy as np
 import pandas as pd
@@ -21,7 +21,7 @@ from src.journal.store import Journal
 from src.risk.manager import RiskManager
 from src.strategy.base import Action, Signal, Strategy
 
-NOW = datetime(2026, 5, 30, 15, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 5, 30, 15, 0, tzinfo=UTC)
 
 
 # --- fakes ------------------------------------------------------------------

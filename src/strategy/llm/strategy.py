@@ -89,7 +89,7 @@ class LlmStrategy(Strategy):
         prompt = self._build_user_prompt(data)
         try:
             raw = self._client.complete(_SYSTEM_PROMPT, prompt)
-        except Exception as exc:  # noqa: BLE001 - never let the model crash a tick
+        except Exception as exc:
             logger.warning("LLM call failed: %s", exc)
             return self.hold(reason=f"LLM call failed: {exc}")
 

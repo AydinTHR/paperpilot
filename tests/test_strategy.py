@@ -15,7 +15,6 @@ from src.strategy.examples.mean_reversion import RsiMeanReversion
 from src.strategy.examples.sma_crossover import SmaCrossover
 from src.strategy.indicators import rsi, sma
 
-
 # --- helpers ---------------------------------------------------------------
 
 

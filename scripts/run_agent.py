@@ -14,9 +14,9 @@ from pathlib import Path
 # Make the project root importable when run as a plain script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from config.logging_config import get_logger, setup_logging  # noqa: E402
-from config.settings import Settings, get_settings  # noqa: E402
-from src.execution.broker import Broker, BrokerError  # noqa: E402
+from config.logging_config import get_logger, setup_logging
+from config.settings import Settings, get_settings
+from src.execution.broker import Broker, BrokerError
 
 logger = get_logger("paperpilot.cli")
 

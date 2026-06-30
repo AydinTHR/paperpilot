@@ -15,3 +15,23 @@ markers = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+
+[tool.ruff.lint]
+# Pyflakes/pycodestyle defaults plus import sorting, bugbear, pyupgrade, and
+# simplification rules. Catches likely bugs and keeps syntax current.
+select = ["E", "F", "W", "I", "B", "UP", "SIM", "C4", "RUF"]
+# Action subclasses (str, Enum) deliberately; switching to StrEnum would change
+# str() semantics used in journal/LLM serialization. Keep the explicit pattern.
+ignore = ["UP042"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests favour explicit, readable assertions over the simplified forms.
+"tests/**" = ["SIM"]
+
+[tool.coverage.run]
+source = ["src", "config"]
+
+[tool.coverage.report]
+# Coverage gate. CI runs pytest with --cov, so this fails the build on a drop.
+# Plain local `pytest` does not pass --cov, so it stays ungated for dev speed.
+fail_under = 88

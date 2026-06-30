@@ -18,7 +18,7 @@ offline with fakes (see ``tests/test_live_loop.py``).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Protocol
 
 from config.logging_config import get_logger
@@ -105,7 +105,7 @@ class TradingLoop:
         lookback: int | None = None,
         journal: Journal | None = None,
         announce: bool = True,
-    ) -> "TradingLoop":
+    ) -> TradingLoop:
         """Wire the loop to the real broker, data provider, risk, and journal.
 
         The risk manager starts from the live account equity and has its peak
@@ -147,7 +147,7 @@ class TradingLoop:
 
     def run_once(self, *, now: datetime | None = None) -> LoopResult:
         """Execute a single trading iteration and return what happened."""
-        now = now or datetime.now(timezone.utc)
+        now = now or datetime.now(UTC)
         account = self.broker.get_account()
         equity, cash = account.equity, account.cash
 
@@ -201,7 +201,7 @@ class TradingLoop:
             bars = self.provider.get_latest_bars(
                 symbol, lookback=self.lookback, interval=self.interval
             )
-        except Exception as exc:  # noqa: BLE001 - one bad symbol must not kill the tick
+        except Exception as exc:
             logger.error("Data fetch failed for %s: %s", symbol, exc)
             return SymbolOutcome(symbol, "SKIP", f"data error: {exc}")
 
@@ -329,13 +329,11 @@ class TradingLoop:
                     result.equity,
                     result.halted,
                 )
-            except Exception:  # noqa: BLE001 - never let one tick kill the scheduler
+            except Exception:
                 logger.exception("Loop tick failed; will retry next interval.")
 
         scheduler = BlockingScheduler(timezone="UTC")
-        scheduler.add_job(
-            _tick, "interval", minutes=interval, next_run_time=datetime.now(timezone.utc)
-        )
+        scheduler.add_job(_tick, "interval", minutes=interval, next_run_time=datetime.now(UTC))
         logger.info(
             "Starting scheduled loop: %s on %s every %d min. Ctrl-C to stop.",
             self.strategy.name,

@@ -185,7 +185,7 @@ class Settings(BaseSettings):
         return provider
 
     @model_validator(mode="after")
-    def _enforce_live_trading_gate(self) -> "Settings":
+    def _enforce_live_trading_gate(self) -> Settings:
         """Refuse to construct settings that would silently enable live trading."""
         if not self.paper and not self.allow_live_trading:
             raise ValueError(

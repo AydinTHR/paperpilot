@@ -2,22 +2,22 @@
 # Grows phase by phase; Phase 1 covers config + Alpaca paper connection.
 
 # --- Phase 1: config, validation, broker ---
-pydantic>=2.7,<3
-pydantic-settings>=2.3,<3
+pydantic>=2.13.4,<3
+pydantic-settings>=2.14.2,<3
 python-dotenv>=1.0,<2
 alpaca-py>=0.33,<1
 
 # --- Phase 2: market data + strategy/indicators ---
 yfinance>=0.2.40,<1
 pandas>=2.2,<3
-numpy>=1.26,<3
+numpy>=2.4.6,<3
 pyarrow>=15
 
 # --- Phase 3: backtesting engine ---
 backtesting>=0.3.3,<1
 
 # --- Phase 5: scheduled live loop + SQLite trade journal ---
-SQLAlchemy>=2.0,<3
+SQLAlchemy>=2.0.51,<3
 APScheduler>=3.10,<4
 
 # --- Phase 6: optional LLM signal layer (provider-agnostic; Claude adapter) ---

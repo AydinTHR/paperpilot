@@ -24,15 +24,15 @@ from pathlib import Path
 # Make the project root importable when run as a plain script.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from config.logging_config import get_logger, setup_logging  # noqa: E402
-from config.settings import get_settings  # noqa: E402
-from src.agent.loop import LoopResult, TradingLoop  # noqa: E402
-from src.execution.broker import BrokerError  # noqa: E402
-from src.journal.store import Journal  # noqa: E402
-from src.strategy.base import Strategy  # noqa: E402
-from src.strategy.examples.mean_reversion import RsiMeanReversion  # noqa: E402
-from src.strategy.examples.sma_crossover import SmaCrossover  # noqa: E402
-from src.strategy.llm.strategy import LlmStrategy  # noqa: E402
+from config.logging_config import get_logger, setup_logging
+from config.settings import get_settings
+from src.agent.loop import LoopResult, TradingLoop
+from src.execution.broker import BrokerError
+from src.journal.store import Journal
+from src.strategy.base import Strategy
+from src.strategy.examples.mean_reversion import RsiMeanReversion
+from src.strategy.examples.sma_crossover import SmaCrossover
+from src.strategy.llm.strategy import LlmStrategy
 
 logger = get_logger("paperpilot.live")
 
@@ -160,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.once:
         try:
             result = loop.run_once()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"\n[live loop FAILED] {exc}\n")
             logger.exception("run_once failed")
             return 1

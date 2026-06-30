@@ -158,7 +158,7 @@ class Broker:
     def get_account(self) -> AccountSnapshot:
         try:
             acct = self._client.get_account()
-        except Exception as exc:  # noqa: BLE001 - re-raised with context
+        except Exception as exc:
             raise BrokerError(f"Failed to fetch account: {exc}") from exc
         return AccountSnapshot(
             account_number=str(getattr(acct, "account_number", "")),
@@ -174,7 +174,7 @@ class Broker:
     def get_positions(self) -> list[PositionInfo]:
         try:
             positions = self._client.get_all_positions()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise BrokerError(f"Failed to fetch positions: {exc}") from exc
         return [
             PositionInfo(
@@ -215,7 +215,7 @@ class Broker:
         )
         try:
             order = self._client.submit_order(order_data=request)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise BrokerError(f"Failed to submit {side} order for {qty} {symbol}: {exc}") from exc
         logger.info("Submitted %s order: %s %s", side, qty, symbol)
         return self._to_order_info(order)
@@ -223,7 +223,7 @@ class Broker:
     def cancel_all_orders(self) -> None:
         try:
             self._client.cancel_orders()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise BrokerError(f"Failed to cancel open orders: {exc}") from exc
         logger.info("Cancelled all open orders.")
 
@@ -231,7 +231,7 @@ class Broker:
         """Liquidate an entire position in ``symbol``."""
         try:
             self._client.close_position(symbol.upper())
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             raise BrokerError(f"Failed to close position {symbol}: {exc}") from exc
         logger.info("Closed position: %s", symbol)
 

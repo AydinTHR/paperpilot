@@ -16,7 +16,6 @@ from src.strategy.base import Signal, Strategy
 from src.strategy.examples.mean_reversion import RsiMeanReversion
 from src.strategy.examples.sma_crossover import SmaCrossover
 
-
 # --- helpers ---------------------------------------------------------------
 
 

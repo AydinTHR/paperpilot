@@ -18,7 +18,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from config.logging_config import get_logger
-from src.journal.models import Base, EquitySnapshot, OrderRecord, SignalRecord
+from src.journal.models import Base, EquitySnapshot, HaltStateRecord, OrderRecord, SignalRecord
 
 logger = get_logger(__name__)
 
@@ -164,6 +164,28 @@ class Journal:
             session.commit()
         return True
 
+    def record_halt(
+        self,
+        *,
+        halt_type: str,
+        active: bool,
+        reason: str = "",
+        triggered_at: datetime | None = None,
+        equity_at_halt: float = 0.0,
+        ts: datetime | None = None,
+    ) -> int:
+        """Append one halt transition (trip or clear) for ``halt_type``."""
+        now = ts or _utcnow()
+        row = HaltStateRecord(
+            ts=now,
+            halt_type=halt_type,
+            active=active,
+            reason=reason,
+            triggered_at=triggered_at or now,
+            equity_at_halt=equity_at_halt,
+        )
+        return self._add(row)
+
     def record_equity(
         self,
         *,
@@ -198,6 +220,12 @@ class Journal:
 
     def recent_equity(self, limit: int = 20) -> list[EquitySnapshot]:
         return self._recent(EquitySnapshot, limit)
+
+    def latest_halt_states(self) -> dict[str, HaltStateRecord]:
+        """The most recent transition per halt type (the authoritative state)."""
+        with self._session_factory() as session:
+            rows = session.scalars(select(HaltStateRecord).order_by(HaltStateRecord.id.asc()))
+            return {row.halt_type: row for row in rows}
 
     def _recent(self, model: type[ModelT], limit: int) -> list[ModelT]:
         with self._session_factory() as session:

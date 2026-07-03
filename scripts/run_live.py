@@ -57,6 +57,24 @@ def _print_result(result: LoopResult) -> None:
     print()
 
 
+def _reset_halt(journal: Journal) -> None:
+    """Journal both halt types as cleared; the next loop start reads this."""
+    states = journal.latest_halt_states()
+    print("\n--- Halt state reset ---")
+    if not states:
+        print("  No halt state recorded; nothing to clear.")
+    for halt_type, row in sorted(states.items()):
+        marker = "ACTIVE" if row.active else "clear"
+        print(f"  {halt_type:<12} was {marker:<7} ({row.reason or 'no reason recorded'})")
+    for halt_type in ("daily_loss", "drawdown"):
+        journal.record_halt(
+            halt_type=halt_type,
+            active=False,
+            reason="manual reset via --reset-halt",
+        )
+    print("  Both halts cleared. The next loop start begins unhalted.\n")
+
+
 def _print_report(journal: Journal, limit: int) -> None:
     counts = journal.counts()
     print("\n--- Trade journal report ---")
@@ -127,6 +145,12 @@ def main(argv: list[str] | None = None) -> int:
         metavar="N",
         help="Print the last N journal rows (read-only) and exit. Default N=20.",
     )
+    parser.add_argument(
+        "--reset-halt",
+        action="store_true",
+        help="Clear the persisted daily-loss / drawdown halts and exit "
+        "(operator action after reviewing what tripped them).",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -140,6 +164,11 @@ def main(argv: list[str] | None = None) -> int:
     # Read-only journal report needs no broker / network.
     if args.report is not None:
         _print_report(Journal(settings.db_url), args.report)
+        return 0
+
+    # Halt reset also needs only the journal; the next loop start reads it.
+    if args.reset_halt:
+        _reset_halt(Journal(settings.db_url))
         return 0
 
     if not args.once and args.interval is None:

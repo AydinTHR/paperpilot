@@ -62,6 +62,26 @@ class OrderRecord(Base):
         )
 
 
+class HaltStateRecord(Base):
+    """Append-only halt transitions; the latest row per type is authoritative."""
+
+    __tablename__ = "halt_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    halt_type: Mapped[str] = mapped_column(String(16), index=True)  # daily_loss | drawdown
+    active: Mapped[bool] = mapped_column(default=False)
+    reason: Mapped[str] = mapped_column(String(128), default="")
+    triggered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    equity_at_halt: Mapped[float] = mapped_column(Float, default=0.0)
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return (
+            f"HaltStateRecord(halt_type={self.halt_type!r}, active={self.active}, "
+            f"triggered_at={self.triggered_at!r})"
+        )
+
+
 class EquitySnapshot(Base):
     __tablename__ = "equity_snapshots"
 

@@ -134,3 +134,19 @@ def test_update_order_fill_unknown_id_is_noop() -> None:
         journal.update_order_fill("missing", status="filled", filled_qty=1.0, filled_avg_price=1.0)
         is False
     )
+
+
+def test_halt_state_round_trip_latest_wins() -> None:
+    journal = Journal("sqlite:///:memory:")
+    journal.record_halt(halt_type="drawdown", active=True, reason="21% below peak")
+    journal.record_halt(halt_type="daily_loss", active=True, reason="down 4%")
+    journal.record_halt(halt_type="drawdown", active=False, reason="manual reset")
+
+    states = journal.latest_halt_states()
+    assert states["drawdown"].active is False  # latest row wins
+    assert states["daily_loss"].active is True
+    assert states["daily_loss"].reason == "down 4%"
+
+
+def test_latest_halt_states_empty_without_rows() -> None:
+    assert Journal("sqlite:///:memory:").latest_halt_states() == {}

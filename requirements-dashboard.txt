@@ -1,0 +1,6 @@
+# Optional dashboard stack: streamlit UI + plotly figures over the journal.
+# Install with: pip install -r requirements-dashboard.txt
+-r requirements.txt
+
+streamlit>=1.40,<2
+plotly>=5.20

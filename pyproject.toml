@@ -30,6 +30,9 @@ ignore = ["UP042"]
 
 [tool.coverage.run]
 source = ["src", "config"]
+# The Streamlit shell has no logic of its own (all in monitoring/queries.py)
+# and cannot import headlessly in CI.
+omit = ["src/monitoring/dashboard.py"]
 
 [tool.coverage.report]
 # Coverage gate. CI runs pytest with --cov, so this fails the build on a drop.

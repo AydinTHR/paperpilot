@@ -23,6 +23,11 @@ backtesting>=0.3.3,<1
 SQLAlchemy>=2.0.51,<3
 APScheduler>=3.10,<4
 
+# --- Monitoring: outbound alerts (Telegram/Discord webhooks) ---
+# Already transitively required by alpaca-py; pinned explicitly since alerts
+# import it directly.
+requests>=2.32,<3
+
 # --- Phase 6: optional LLM signal layer (provider-agnostic; Claude adapter) ---
 # Soft dependency: imported lazily, only when the LLM strategy is used with a key.
 anthropic>=0.113.0,<1

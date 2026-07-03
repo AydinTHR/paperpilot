@@ -36,7 +36,7 @@ class LlmConfig:
     """Backend-neutral LLM call parameters."""
 
     provider: str = "anthropic"
-    model: str = "claude-3-5-haiku-latest"
+    model: str = "claude-haiku-4-5"
     max_tokens: int = 512
     temperature: float = 0.0
     timeout_seconds: float = 30.0

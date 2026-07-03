@@ -25,10 +25,12 @@ later folds.
 
 from __future__ import annotations
 
+import multiprocessing.dummy
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+import backtesting
 import pandas as pd
 from backtesting import Backtest
 
@@ -46,6 +48,12 @@ if TYPE_CHECKING:
     from src.risk.manager import RiskManager
 
 logger = get_logger(__name__)
+
+# Optimization runs on THREADS, not processes: the param adapters are built
+# dynamically (function-local classes carrying closures), which process pools
+# cannot pickle. backtesting.Pool is the library's documented override seam;
+# pandas releases the GIL for the heavy parts, and the grids here are small.
+backtesting.Pool = multiprocessing.dummy.Pool
 
 WFE_OVERFIT_THRESHOLD = 0.5
 

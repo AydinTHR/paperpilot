@@ -661,3 +661,68 @@ def test_from_settings_restores_todays_daily_trip(monkeypatch) -> None:
     )
     loop = _patched_from_settings(monkeypatch, journal)
     assert loop.risk.halted
+
+
+# --- alert points ---------------------------------------------------------------
+
+
+class _RecordingAlerter:
+    def __init__(self) -> None:
+        self.messages: list[str] = []
+
+    def send(self, message: str) -> bool:
+        self.messages.append(message)
+        return True
+
+
+def test_halt_transition_fires_alert_once() -> None:
+    broker = _FakeBroker(equity=100_000.0, cash=100_000.0)
+    alerter = _RecordingAlerter()
+    loop = _loop(
+        broker,
+        _FakeProvider(_bars()),
+        _StubStrategy(Signal(Action.HOLD)),
+        symbols=["AAPL"],
+    )
+    loop.alerter = alerter
+
+    loop.run_once(now=NOW)  # healthy tick, no alert
+    broker.equity = 95_000.0  # -5% intraday -> daily kill switch (limit 3%)
+    loop.run_once(now=NOW)
+    broker.equity = 94_000.0  # still halted -> no second alert
+    loop.run_once(now=NOW)
+
+    halt_alerts = [m for m in alerter.messages if "HALT" in m]
+    assert len(halt_alerts) == 1
+    assert "daily-loss" in halt_alerts[0]
+
+
+def test_stop_loss_fires_alert() -> None:
+    broker = _FakeBroker(
+        equity=95_000.0,
+        cash=0.0,
+        positions=[_position("AAPL", qty=50, entry=100.0, price=90.0)],
+    )
+    alerter = _RecordingAlerter()
+    loop = _loop(
+        broker,
+        _FakeProvider(_bars(last_close=90.0)),
+        _StubStrategy(Signal(Action.HOLD)),
+        symbols=["AAPL"],
+    )
+    loop.alerter = alerter
+    loop.run_once(now=NOW)
+    assert any("STOP: AAPL" in m for m in alerter.messages)
+
+
+def test_tick_failure_fires_alert() -> None:
+    alerter = _RecordingAlerter()
+    loop = _loop(
+        _ExplodingBroker(),
+        _FakeProvider(_bars()),
+        _StubStrategy(Signal(Action.HOLD)),
+        symbols=["AAPL"],
+    )
+    loop.alerter = alerter
+    assert loop.scheduled_tick() is None
+    assert any("ERROR" in m for m in alerter.messages)

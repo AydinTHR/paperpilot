@@ -73,15 +73,15 @@ if halt.halted:
         f"--reset-halt` after review."
     )
 
-st.plotly_chart(queries.build_equity_figure(equity_df), use_container_width=True)
+st.plotly_chart(queries.build_equity_figure(equity_df), width="stretch")
 
 col_orders, col_signals = st.columns(2)
 with col_orders:
     st.subheader("Recent orders")
-    st.dataframe(_orders(db_url), use_container_width=True, hide_index=True)
+    st.dataframe(_orders(db_url), width="stretch", hide_index=True)
 with col_signals:
     st.subheader("Recent signals")
-    st.dataframe(_signals(db_url), use_container_width=True, hide_index=True)
+    st.dataframe(_signals(db_url), width="stretch", hide_index=True)
 
 if st.button("Refresh now"):
     st.cache_data.clear()

@@ -114,6 +114,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--lookback", type=int, default=None, help="Bars to fetch per symbol.")
     parser.add_argument(
+        "--ignore-market-hours",
+        action="store_true",
+        help="Run scheduled ticks even while the market is closed.",
+    )
+    parser.add_argument(
         "--report",
         nargs="?",
         type=int,
@@ -150,7 +155,11 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         loop = TradingLoop.from_settings(
-            settings, strategy=strategy, symbols=symbols, lookback=args.lookback
+            settings,
+            strategy=strategy,
+            symbols=symbols,
+            lookback=args.lookback,
+            market_hours_gate=False if args.ignore_market_hours else None,
         )
     except BrokerError as exc:
         print(f"\n[live loop FAILED] {exc}\n")

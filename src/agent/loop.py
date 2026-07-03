@@ -48,6 +48,13 @@ class DataProviderLike(Protocol):
     def get_latest_bars(self, symbol: str, lookback: int, interval: str) -> pd.DataFrame: ...
 
 
+class MarketCalendarLike(Protocol):
+    """The slice of :class:`~src.agent.market_hours.MarketCalendar` the loop uses."""
+
+    def is_market_open(self, now: datetime | None = None) -> bool: ...
+    def next_session_open(self, now: datetime | None = None) -> datetime | None: ...
+
+
 @dataclass(frozen=True)
 class SymbolOutcome:
     """What the loop decided (and did) for one symbol this tick."""
@@ -86,6 +93,7 @@ class TradingLoop:
         settings: Settings,
         symbols: list[str],
         lookback: int | None = None,
+        market_calendar: MarketCalendarLike | None = None,
     ) -> None:
         self.broker = broker
         self.provider = provider
@@ -97,6 +105,9 @@ class TradingLoop:
         self.interval = settings.default_interval
         # Enough history to warm the strategy up, with headroom.
         self.lookback = lookback or max(strategy.min_bars + 50, 200)
+        # When set, scheduled ticks are skipped while the market is closed.
+        # run_once is never gated, so --once and tests always execute.
+        self.market_calendar = market_calendar
 
     @classmethod
     def from_settings(
@@ -108,13 +119,17 @@ class TradingLoop:
         lookback: int | None = None,
         journal: Journal | None = None,
         announce: bool = True,
+        market_hours_gate: bool | None = None,
     ) -> TradingLoop:
         """Wire the loop to the real broker, data provider, risk, and journal.
 
         The risk manager starts from the live account equity and has its peak
         seeded from the journal, so a process restart cannot forget a prior
         drawdown and silently re-arm the halt from a lower baseline.
+        ``market_hours_gate`` overrides ``settings.market_hours_only`` (the CLI
+        flag ``--ignore-market-hours`` passes False).
         """
+        from src.agent.market_hours import MarketCalendar
         from src.data.universe import get_universe
 
         settings = settings or get_settings()
@@ -135,6 +150,7 @@ class TradingLoop:
         if peak is not None:
             risk.seed_peak(peak)
 
+        gate = settings.market_hours_only if market_hours_gate is None else market_hours_gate
         return cls(
             broker=broker,
             provider=provider,
@@ -144,6 +160,7 @@ class TradingLoop:
             settings=settings,
             symbols=symbols or get_universe(),
             lookback=lookback,
+            market_calendar=MarketCalendar() if gate else None,
         )
 
     # --- one iteration -------------------------------------------------------
@@ -322,25 +339,38 @@ class TradingLoop:
 
     # --- scheduled mode ------------------------------------------------------
 
+    def scheduled_tick(self, *, now: datetime | None = None) -> LoopResult | None:
+        """One scheduler tick: the market-hours gate plus a crash-contained run.
+
+        A plain method rather than a closure so both behaviours are testable
+        without a running scheduler. Returns None when the tick was skipped
+        (market closed) or failed (logged; the scheduler retries next interval).
+        """
+        now = now or datetime.now(UTC)
+        if self.market_calendar is not None and not self.market_calendar.is_market_open(now):
+            logger.info(
+                "Market closed; skipping tick. Next open: %s",
+                self.market_calendar.next_session_open(now),
+            )
+            return None
+        try:
+            result = self.run_once(now=now)
+        except Exception:
+            logger.exception("Loop tick failed; will retry next interval.")
+            return None
+        logger.info("Scheduled tick complete: equity=%.2f halted=%s", result.equity, result.halted)
+        return result
+
     def run_scheduled(self, interval_minutes: int | None = None) -> None:
         """Run :meth:`run_once` forever on an APScheduler interval (blocking)."""
         from apscheduler.schedulers.blocking import BlockingScheduler
 
         interval = interval_minutes or self.settings.loop_interval_minutes
 
-        def _tick() -> None:
-            try:
-                result = self.run_once()
-                logger.info(
-                    "Scheduled tick complete: equity=%.2f halted=%s",
-                    result.equity,
-                    result.halted,
-                )
-            except Exception:
-                logger.exception("Loop tick failed; will retry next interval.")
-
         scheduler = BlockingScheduler(timezone="UTC")
-        scheduler.add_job(_tick, "interval", minutes=interval, next_run_time=datetime.now(UTC))
+        scheduler.add_job(
+            self.scheduled_tick, "interval", minutes=interval, next_run_time=datetime.now(UTC)
+        )
         logger.info(
             "Starting scheduled loop: %s on %s every %d min. Ctrl-C to stop.",
             self.strategy.name,

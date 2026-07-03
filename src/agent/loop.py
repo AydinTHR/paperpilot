@@ -25,6 +25,7 @@ from config.logging_config import get_logger
 from config.settings import Settings, get_settings
 from src.data.market_data import build_provider
 from src.execution.broker import AccountSnapshot, Broker, BrokerError, OrderInfo, PositionInfo
+from src.execution.reconcile import OrderReconciler
 from src.journal.store import Journal
 from src.risk.manager import RiskManager
 from src.strategy.base import Action, Strategy
@@ -41,7 +42,18 @@ class BrokerLike(Protocol):
     def get_account(self) -> AccountSnapshot: ...
     def get_positions(self) -> list[PositionInfo]: ...
     def place_market_order(self, symbol: str, qty: float, side: str) -> OrderInfo: ...
+    def place_market_order_with_stop(
+        self,
+        symbol: str,
+        qty: float,
+        side: str,
+        stop_price: float,
+        *,
+        ref_price: float | None = None,
+    ) -> OrderInfo: ...
     def close_position(self, symbol: str) -> None: ...
+    def get_order(self, order_id: str) -> OrderInfo: ...
+    def get_open_orders(self, symbol: str | None = None) -> list[OrderInfo]: ...
 
 
 class DataProviderLike(Protocol):
@@ -94,6 +106,7 @@ class TradingLoop:
         symbols: list[str],
         lookback: int | None = None,
         market_calendar: MarketCalendarLike | None = None,
+        reconciler: OrderReconciler | None = None,
     ) -> None:
         self.broker = broker
         self.provider = provider
@@ -108,6 +121,7 @@ class TradingLoop:
         # When set, scheduled ticks are skipped while the market is closed.
         # run_once is never gated, so --once and tests always execute.
         self.market_calendar = market_calendar
+        self._reconciler = reconciler or OrderReconciler(broker)
 
     @classmethod
     def from_settings(
@@ -235,10 +249,13 @@ class TradingLoop:
         price = float(bars["Close"].iloc[-1])
         holding = position is not None and position.qty > 0
 
-        # Live stop-loss: exit a losing position before considering any signal.
+        # Loop-side stop-loss. With broker-held stops this is a BACKSTOP that
+        # only engages when no live stop order protects the position (Alpaca
+        # DAY stop legs expire at the close, leaving overnight holds bare).
         if (
             holding
             and position is not None
+            and not self._has_live_stop(symbol)
             and self.risk.stop_breached(position.avg_entry_price, price)
         ):
             self.broker.close_position(symbol)
@@ -302,18 +319,44 @@ class TradingLoop:
         if qty < 1:
             return SymbolOutcome(symbol, "HOLD", "risk-sized qty < 1 share", price=price)
 
-        order = self.broker.place_market_order(symbol, qty, "buy")
+        use_stop = self.settings.resolved_use_broker_stops and self.risk.limits.stop_loss_pct > 0
+        try:
+            if use_stop:
+                order = self.broker.place_market_order_with_stop(
+                    symbol, qty, "buy", self.risk.stop_price(price), ref_price=price
+                )
+            else:
+                order = self.broker.place_market_order(symbol, qty, "buy")
+        except BrokerError as exc:
+            # A rejected entry (wash trade, transient API failure) must not
+            # kill the tick; the signal simply goes unfilled this round.
+            logger.warning("Entry rejected for %s: %s", symbol, exc)
+            return SymbolOutcome(symbol, "SKIP", f"order rejected: {exc}", price=price)
+
+        recon = self._reconciler.wait_for_terminal(order.id)
         self.journal.record_order(
             symbol=symbol,
             side="buy",
             qty=qty,
-            status=order.status,
+            status=recon.status,
             broker_order_id=order.id,
-            filled_avg_price=order.filled_avg_price,
+            filled_qty=recon.filled_qty,
+            filled_avg_price=recon.filled_avg_price,
             reason="signal BUY",
             ts=now,
         )
         return SymbolOutcome(symbol, "BUY", reason, qty=qty, price=price, order_id=order.id)
+
+    def _has_live_stop(self, symbol: str) -> bool:
+        """True when a broker-held stop order currently protects ``symbol``."""
+        if not self.settings.resolved_use_broker_stops:
+            return False
+        try:
+            orders = self.broker.get_open_orders(symbol)
+        except Exception as exc:
+            logger.warning("Open-order check failed for %s (%s); using loop stop.", symbol, exc)
+            return False
+        return any("stop" in o.order_type.lower() for o in orders)
 
     def _flatten_all(
         self,

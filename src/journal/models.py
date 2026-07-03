@@ -51,6 +51,7 @@ class OrderRecord(Base):
     qty: Mapped[float] = mapped_column(Float)
     status: Mapped[str] = mapped_column(String(32), default="")
     broker_order_id: Mapped[str] = mapped_column(String(64), default="")
+    filled_qty: Mapped[float] = mapped_column(Float, default=0.0)
     filled_avg_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     reason: Mapped[str] = mapped_column(String(64), default="")
 

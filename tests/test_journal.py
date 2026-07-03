@@ -82,3 +82,55 @@ def test_halt_fields_persist() -> None:
     row = journal.recent_equity()[0]
     assert row.halted is True
     assert row.halt_reason == "max-drawdown halt active"
+
+
+def test_ensure_column_migrates_old_database(tmp_path) -> None:
+    # Simulate a journal file created before filled_qty existed.
+    import sqlite3
+
+    db = tmp_path / "old.db"
+    conn = sqlite3.connect(db)
+    conn.execute(
+        "CREATE TABLE orders (id INTEGER PRIMARY KEY, ts TIMESTAMP, symbol VARCHAR(16), "
+        "side VARCHAR(8), qty FLOAT, status VARCHAR(32), broker_order_id VARCHAR(64), "
+        "filled_avg_price FLOAT, reason VARCHAR(64))"
+    )
+    conn.execute(
+        "INSERT INTO orders (ts, symbol, side, qty, status, broker_order_id, "
+        "filled_avg_price, reason) VALUES ('2026-01-01', 'AAPL', 'buy', 5, 'filled', "
+        "'b-1', 100.0, 'legacy row')"
+    )
+    conn.commit()
+    conn.close()
+
+    journal = Journal(f"sqlite:///{db}")  # __init__ runs the migration
+    orders = journal.recent_orders()
+    assert orders[0].symbol == "AAPL"
+    assert orders[0].filled_qty == 0.0  # defaulted on the legacy row
+
+    # New writes populate it.
+    journal.record_order(symbol="MSFT", side="buy", qty=3, filled_qty=3.0)
+    assert journal.recent_orders()[-1].filled_qty == 3.0
+
+
+def test_update_order_fill_reconciles_in_place() -> None:
+    journal = Journal("sqlite:///:memory:")
+    journal.record_order(
+        symbol="AAPL", side="buy", qty=10, status="accepted", broker_order_id="b-9"
+    )
+    assert journal.update_order_fill(
+        "b-9", status="filled", filled_qty=10.0, filled_avg_price=101.5
+    )
+    row = journal.recent_orders()[0]
+    assert row.status == "filled"
+    assert row.filled_qty == 10.0
+    assert row.filled_avg_price == 101.5
+    assert journal.counts()["orders"] == 1  # updated, not re-appended
+
+
+def test_update_order_fill_unknown_id_is_noop() -> None:
+    journal = Journal("sqlite:///:memory:")
+    assert (
+        journal.update_order_fill("missing", status="filled", filled_qty=1.0, filled_avg_price=1.0)
+        is False
+    )

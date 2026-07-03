@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import pytest
-from alpaca.trading.enums import OrderSide
+from alpaca.trading.enums import OrderClass, OrderSide
 
 from config.settings import Settings
 from src.execution.broker import (
@@ -12,6 +12,7 @@ from src.execution.broker import (
     BrokerError,
     OrderInfo,
     PositionInfo,
+    WashTradeError,
     _to_float,
 )
 
@@ -41,8 +42,8 @@ class _FakePosition:
 
 
 class _FakeOrder:
-    def __init__(self, req: object) -> None:
-        self.id = "order-1"
+    def __init__(self, req: object, order_id: str = "order-1") -> None:
+        self.id = order_id
         self.symbol = req.symbol
         self.qty = req.qty
         self.side = req.side  # OrderSide enum
@@ -50,13 +51,19 @@ class _FakeOrder:
         self.status = "accepted"
         self.filled_qty = "0"
         self.filled_avg_price = None
+        # OTO/bracket fields captured for assertions.
+        self.order_class = getattr(req, "order_class", None)
+        self.stop_loss = getattr(req, "stop_loss", None)
 
 
 class FakeClient:
-    def __init__(self) -> None:
+    def __init__(self, *, submit_raises: Exception | None = None) -> None:
         self.cancelled = False
         self.closed: list[str] = []
         self.orders: list[_FakeOrder] = []
+        self.cancelled_ids: list[str] = []
+        self.open_orders: list[_FakeOrder] = []
+        self._submit_raises = submit_raises
 
     def get_account(self) -> _FakeAccount:
         return _FakeAccount()
@@ -65,7 +72,9 @@ class FakeClient:
         return [_FakePosition()]
 
     def submit_order(self, order_data: object) -> _FakeOrder:
-        order = _FakeOrder(order_data)
+        if self._submit_raises is not None:
+            raise self._submit_raises
+        order = _FakeOrder(order_data, order_id=f"order-{len(self.orders) + 1}")
         self.orders.append(order)
         return order
 
@@ -74,6 +83,18 @@ class FakeClient:
 
     def close_position(self, symbol: str) -> None:
         self.closed.append(symbol)
+
+    def get_order_by_id(self, order_id: str) -> _FakeOrder:
+        for order in self.orders:
+            if order.id == order_id:
+                return order
+        raise KeyError(order_id)
+
+    def get_orders(self, filter: object = None) -> list[_FakeOrder]:
+        return list(self.open_orders)
+
+    def cancel_order_by_id(self, order_id: str) -> None:
+        self.cancelled_ids.append(order_id)
 
 
 # --- helpers ---------------------------------------------------------------
@@ -173,3 +194,89 @@ def test_to_float_is_robust() -> None:
     assert _to_float("abc", default=1.0) == 1.0
     assert _to_float("3.5") == 3.5
     assert _to_float("12") == 12.0
+
+
+# --- broker-held stops (OTO) -------------------------------------------------
+
+
+def test_market_order_with_stop_builds_oto_request() -> None:
+    client = FakeClient()
+    broker = Broker(paper_settings(), client=client, announce=False)
+    info = broker.place_market_order_with_stop("aapl", 10, "buy", 95.0, ref_price=100.0)
+    assert isinstance(info, OrderInfo)
+    order = client.orders[0]
+    assert order.symbol == "AAPL"
+    assert order.order_class == OrderClass.OTO
+    assert order.stop_loss is not None
+    assert order.stop_loss.stop_price == 95.0
+
+
+def test_stop_clamped_below_ref_price() -> None:
+    client = FakeClient()
+    broker = Broker(paper_settings(), client=client, announce=False)
+    # A stop at/above the base price is invalid at Alpaca; clamp to ref - 0.01.
+    broker.place_market_order_with_stop("AAPL", 5, "buy", 101.0, ref_price=100.0)
+    assert client.orders[0].stop_loss.stop_price == 99.99
+
+
+def test_oto_rejects_fractional_shares() -> None:
+    broker = make_broker()
+    with pytest.raises(BrokerError, match="whole shares"):
+        broker.place_market_order_with_stop("AAPL", 1.5, "buy", 95.0)
+
+
+def test_oto_rejects_nonpositive_stop() -> None:
+    broker = make_broker()
+    with pytest.raises(BrokerError, match="Stop price"):
+        broker.place_market_order_with_stop("AAPL", 1, "buy", 0.0)
+
+
+def test_oto_reasserts_live_gate() -> None:
+    forbidden = Settings.model_construct(paper=False, allow_live_trading=False)
+    broker = Broker.__new__(Broker)  # bypass __init__ gate to test the method's own
+    broker.settings = forbidden
+    broker._client = FakeClient()
+    with pytest.raises(BrokerError, match="live order"):
+        broker.place_market_order_with_stop("AAPL", 1, "buy", 95.0)
+
+
+def test_wash_trade_rejection_is_typed() -> None:
+    client = FakeClient(submit_raises=RuntimeError('{"code": 40310000, "message": "wash"}'))
+    broker = Broker(paper_settings(), client=client, announce=False)
+    with pytest.raises(WashTradeError):
+        broker.place_market_order("AAPL", 1, "buy")
+
+
+# --- order status + cancel-before-close ---------------------------------------
+
+
+def test_get_order_returns_current_state() -> None:
+    client = FakeClient()
+    broker = Broker(paper_settings(), client=client, announce=False)
+    placed = broker.place_market_order("AAPL", 5, "buy")
+    client.orders[0].status = "filled"
+    client.orders[0].filled_qty = "5"
+    client.orders[0].filled_avg_price = "100.5"
+    fetched = broker.get_order(placed.id)
+    assert fetched.status == "filled"
+    assert fetched.filled_qty == 5.0
+    assert fetched.filled_avg_price == 100.5
+
+
+def test_close_position_cancels_open_orders_first() -> None:
+    client = FakeClient()
+    broker = Broker(paper_settings(), client=client, announce=False)
+    stop_leg = broker.place_market_order_with_stop("AAPL", 5, "buy", 95.0)
+    client.open_orders = [client.orders[0]]  # the stop leg is still live
+    broker.close_position("AAPL")
+    assert client.cancelled_ids == [stop_leg.id]
+    assert client.closed == ["AAPL"]
+
+
+def test_get_open_orders_degrades_to_empty_on_error() -> None:
+    class _Exploding(FakeClient):
+        def get_orders(self, filter: object = None) -> list[_FakeOrder]:
+            raise ConnectionError("api down")
+
+    broker = Broker(paper_settings(), client=_Exploding(), announce=False)
+    assert broker.get_open_orders("AAPL") == []

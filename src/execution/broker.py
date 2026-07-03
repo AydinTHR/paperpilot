@@ -12,8 +12,8 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from alpaca.trading.client import TradingClient
-from alpaca.trading.enums import OrderSide, TimeInForce
-from alpaca.trading.requests import MarketOrderRequest
+from alpaca.trading.enums import OrderClass, OrderSide, QueryOrderStatus, TimeInForce
+from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest, StopLossRequest
 
 from config.logging_config import get_logger
 from config.settings import (
@@ -30,6 +30,14 @@ class BrokerError(RuntimeError):
     """Raised when a broker operation fails or is disallowed."""
 
 
+class WashTradeError(BrokerError):
+    """Alpaca rejected the order as a potential wash trade (HTTP 403).
+
+    Happens on rapid flatten-then-re-enter within the same symbol; callers
+    should skip the entry this tick rather than treat it as a hard failure.
+    """
+
+
 # --- Plain, SDK-agnostic data carriers returned to the rest of the app ---
 
 
@@ -42,7 +50,9 @@ class AccountSnapshot:
     equity: float
     buying_power: float
     portfolio_value: float
-    pattern_day_trader: bool
+    # Deprecated: Alpaca removes PDT fields from the API in July 2026 (the
+    # Intraday Margin Rule replaces PDT). Defaulted so absence is harmless.
+    pattern_day_trader: bool = False
 
 
 @dataclass(frozen=True)
@@ -81,6 +91,9 @@ class TradingClientProtocol(Protocol):
     def submit_order(self, order_data): ...
     def cancel_orders(self): ...
     def close_position(self, symbol_or_asset_id): ...
+    def get_order_by_id(self, order_id): ...
+    def get_orders(self, filter=None): ...
+    def cancel_order_by_id(self, order_id): ...
 
 
 def _to_float(value: object, default: float = 0.0) -> float:
@@ -100,6 +113,14 @@ def _enum_str(value: object) -> str:
     yields the clean string ("ACTIVE") instead of the repr ("AccountStatus.ACTIVE").
     """
     return str(getattr(value, "value", value))
+
+
+def _is_wash_trade(exc: Exception) -> bool:
+    """Detect Alpaca's wash-trade rejection (HTTP 403, error code 40310000)."""
+    if getattr(exc, "status_code", None) == 403:
+        return True
+    text = str(exc)
+    return "40310000" in text or "wash trade" in text.lower()
 
 
 class Broker:
@@ -206,18 +227,59 @@ class Broker:
         """
         if qty <= 0:
             raise BrokerError(f"Order qty must be positive, got {qty}.")
-        order_side = self._coerce_side(side)
         request = MarketOrderRequest(
             symbol=symbol.upper(),
             qty=qty,
-            side=order_side,
+            side=self._coerce_side(side),
             time_in_force=time_in_force,
         )
-        try:
-            order = self._client.submit_order(order_data=request)
-        except Exception as exc:
-            raise BrokerError(f"Failed to submit {side} order for {qty} {symbol}: {exc}") from exc
+        order = self._submit(request, f"{side} order for {qty} {symbol}")
         logger.info("Submitted %s order: %s %s", side, qty, symbol)
+        return self._to_order_info(order)
+
+    def place_market_order_with_stop(
+        self,
+        symbol: str,
+        qty: float,
+        side: str,
+        stop_price: float,
+        *,
+        ref_price: float | None = None,
+    ) -> OrderInfo:
+        """Market entry with a broker-held protective stop (OTO order class).
+
+        The stop lives at Alpaca, so the position is protected between loop
+        ticks and across agent downtime. Constraints from Alpaca's order rules:
+        whole shares only, and the sell-stop must sit at least $0.01 below the
+        base price (``ref_price``, normally the last close), so the stop is
+        clamped and rounded to cents.
+        """
+        # Defense in depth, same as __init__: never a live order by accident.
+        if not self.settings.paper and not self.settings.allow_live_trading:
+            raise BrokerError(
+                "Refusing to submit a live order: PAPER=false requires ALLOW_LIVE_TRADING=true."
+            )
+        if qty <= 0:
+            raise BrokerError(f"Order qty must be positive, got {qty}.")
+        if int(qty) != qty:
+            raise BrokerError(f"OTO orders require whole shares, got qty={qty}.")
+
+        stop = round(stop_price, 2)
+        if ref_price is not None:
+            stop = round(min(stop, ref_price - 0.01), 2)
+        if stop <= 0:
+            raise BrokerError(f"Stop price must be positive, got {stop} (from {stop_price}).")
+
+        request = MarketOrderRequest(
+            symbol=symbol.upper(),
+            qty=int(qty),
+            side=self._coerce_side(side),
+            time_in_force=TimeInForce.DAY,
+            order_class=OrderClass.OTO,
+            stop_loss=StopLossRequest(stop_price=stop),
+        )
+        order = self._submit(request, f"{side}+stop order for {qty} {symbol}")
+        logger.info("Submitted %s order: %s %s with stop @ %.2f", side, qty, symbol, stop)
         return self._to_order_info(order)
 
     def cancel_all_orders(self) -> None:
@@ -228,12 +290,61 @@ class Broker:
         logger.info("Cancelled all open orders.")
 
     def close_position(self, symbol: str) -> None:
-        """Liquidate an entire position in ``symbol``."""
+        """Liquidate an entire position in ``symbol``.
+
+        Any open orders on the symbol (e.g. a broker-held OTO stop leg) are
+        cancelled first: Alpaca rejects a close while they are live. The cancel
+        is best-effort so a stuck order cannot block an exit attempt.
+        """
+        symbol = symbol.upper()
+        for order in self.get_open_orders(symbol):
+            try:
+                self._client.cancel_order_by_id(order.id)
+                logger.info("Cancelled open order %s on %s before close.", order.id, symbol)
+            except Exception as exc:
+                logger.warning("Could not cancel order %s on %s: %s", order.id, symbol, exc)
         try:
-            self._client.close_position(symbol.upper())
+            self._client.close_position(symbol)
         except Exception as exc:
             raise BrokerError(f"Failed to close position {symbol}: {exc}") from exc
         logger.info("Closed position: %s", symbol)
+
+    # --- order status ---
+
+    def get_order(self, order_id: str) -> OrderInfo:
+        """Fetch one order's current status/fill state by id."""
+        try:
+            order = self._client.get_order_by_id(order_id)
+        except Exception as exc:
+            raise BrokerError(f"Failed to fetch order {order_id}: {exc}") from exc
+        return self._to_order_info(order)
+
+    def get_open_orders(self, symbol: str | None = None) -> list[OrderInfo]:
+        """Open orders, optionally restricted to one symbol.
+
+        Failures degrade to an empty list: callers use this to decide whether
+        extra protection or cleanup is needed, and must not crash the tick.
+        """
+        request = GetOrdersRequest(
+            status=QueryOrderStatus.OPEN,
+            symbols=[symbol.upper()] if symbol else None,
+        )
+        try:
+            orders = self._client.get_orders(filter=request)
+        except Exception as exc:
+            logger.warning("Failed to fetch open orders (%s); assuming none.", exc)
+            return []
+        return [self._to_order_info(o) for o in orders]
+
+    def _submit(self, request: object, description: str) -> object:
+        try:
+            return self._client.submit_order(order_data=request)
+        except Exception as exc:
+            if _is_wash_trade(exc):
+                raise WashTradeError(
+                    f"Rejected as potential wash trade: {description}: {exc}"
+                ) from exc
+            raise BrokerError(f"Failed to submit {description}: {exc}") from exc
 
     # --- helpers ---
 

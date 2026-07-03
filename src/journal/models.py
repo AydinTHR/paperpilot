@@ -47,6 +47,7 @@ class OrderRecord(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     symbol: Mapped[str] = mapped_column(String(16), index=True)
+    strategy: Mapped[str] = mapped_column(String(64), default="")
     side: Mapped[str] = mapped_column(String(8))
     qty: Mapped[float] = mapped_column(Float)
     status: Mapped[str] = mapped_column(String(32), default="")
@@ -59,6 +60,32 @@ class OrderRecord(Base):
         return (
             f"OrderRecord(ts={self.ts!r}, symbol={self.symbol!r}, "
             f"side={self.side!r}, qty={self.qty}, reason={self.reason!r})"
+        )
+
+
+class TradeRecord(Base):
+    """A realized (entry, exit) trade, FIFO-paired from order fills."""
+
+    __tablename__ = "trades"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), index=True)
+    strategy: Mapped[str] = mapped_column(String(64), index=True, default="")
+    entry_time: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    exit_time: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    qty: Mapped[float] = mapped_column(Float)
+    entry_px: Mapped[float] = mapped_column(Float)
+    exit_px: Mapped[float] = mapped_column(Float)
+    pnl: Mapped[float] = mapped_column(Float)
+    pnl_pct: Mapped[float] = mapped_column(Float, default=0.0)
+    holding_period_hours: Mapped[float] = mapped_column(Float, default=0.0)
+    entry_reason: Mapped[str] = mapped_column(String(64), default="")
+    exit_reason: Mapped[str] = mapped_column(String(64), default="")
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return (
+            f"TradeRecord(symbol={self.symbol!r}, strategy={self.strategy!r}, "
+            f"qty={self.qty}, pnl={self.pnl:.2f})"
         )
 
 

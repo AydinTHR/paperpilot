@@ -57,6 +57,29 @@ def _print_result(result: LoopResult) -> None:
     print()
 
 
+def _print_trades_report(journal: Journal) -> None:
+    """Rebuild the trades table from fills and print per-strategy stats."""
+    count = journal.rebuild_trades()
+    print("\n--- Realized trades (FIFO-paired from actual fills) ---")
+    print(f"  DB              : {journal.db_url}")
+    print(f"  Realized trades : {count}")
+    report = journal.strategy_report()
+    if not report:
+        print("  (no completed round trips yet)\n")
+        return
+    print(
+        f"\n  {'STRATEGY':<16}{'TRADES':>7}{'WIN%':>7}{'AVG WIN':>10}"
+        f"{'AVG LOSS':>10}{'PF':>7}{'TOTAL P&L':>11}{'AVG HOLD(h)':>12}"
+    )
+    for name, s in report.items():
+        pf = f"{s.profit_factor:.2f}" if s.profit_factor != float("inf") else "inf"
+        print(
+            f"  {name:<16}{s.num_trades:>7}{s.win_rate_pct:>7.1f}{s.avg_win:>10.2f}"
+            f"{s.avg_loss:>10.2f}{pf:>7}{s.total_pnl:>11.2f}{s.avg_holding_hours:>12.1f}"
+        )
+    print()
+
+
 def _reset_halt(journal: Journal) -> None:
     """Journal both halt types as cleared; the next loop start reads this."""
     states = journal.latest_halt_states()
@@ -151,6 +174,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Clear the persisted daily-loss / drawdown halts and exit "
         "(operator action after reviewing what tripped them).",
     )
+    parser.add_argument(
+        "--trades-report",
+        action="store_true",
+        help="Rebuild the FIFO trades table and print per-strategy realized P&L, then exit.",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -169,6 +197,10 @@ def main(argv: list[str] | None = None) -> int:
     # Halt reset also needs only the journal; the next loop start reads it.
     if args.reset_halt:
         _reset_halt(Journal(settings.db_url))
+        return 0
+
+    if args.trades_report:
+        _print_trades_report(Journal(settings.db_url))
         return 0
 
     if not args.once and args.interval is None:

@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
+
+if TYPE_CHECKING:
+    from src.journal.trades import StrategyStats
 
 from sqlalchemy import Engine, create_engine, func, select
 from sqlalchemy.engine import make_url
@@ -18,7 +21,14 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from config.logging_config import get_logger
-from src.journal.models import Base, EquitySnapshot, HaltStateRecord, OrderRecord, SignalRecord
+from src.journal.models import (
+    Base,
+    EquitySnapshot,
+    HaltStateRecord,
+    OrderRecord,
+    SignalRecord,
+    TradeRecord,
+)
 
 logger = get_logger(__name__)
 
@@ -82,6 +92,7 @@ class Journal:
         # create_all never ALTERs existing tables, so columns added after a
         # user's journal file was created must be migrated explicitly.
         _ensure_column(self._engine, "orders", "filled_qty", "FLOAT DEFAULT 0.0")
+        _ensure_column(self._engine, "orders", "strategy", "VARCHAR(64) DEFAULT ''")
         self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
         logger.info("Trade journal ready at %s", db_url)
 
@@ -113,6 +124,7 @@ class Journal:
         symbol: str,
         side: str,
         qty: float,
+        strategy: str = "",
         status: str = "",
         broker_order_id: str = "",
         filled_qty: float = 0.0,
@@ -123,6 +135,7 @@ class Journal:
         row = OrderRecord(
             ts=ts or _utcnow(),
             symbol=symbol.upper(),
+            strategy=strategy,
             side=side,
             qty=qty,
             status=status,
@@ -226,6 +239,55 @@ class Journal:
         with self._session_factory() as session:
             rows = session.scalars(select(HaltStateRecord).order_by(HaltStateRecord.id.asc()))
             return {row.halt_type: row for row in rows}
+
+    # --- realized trades -------------------------------------------------------
+
+    def rebuild_trades(self) -> int:
+        """Recompute the trades table from order fills (idempotent); returns count.
+
+        Delete-and-rebuild keeps pairing correct after any order reconciliation
+        or backfill, at the cost of rewriting a small table.
+        """
+        from sqlalchemy import delete
+
+        from src.journal.trades import build_trades
+
+        trades = build_trades(self._all_orders())
+        with self._session_factory() as session:
+            session.execute(delete(TradeRecord))
+            for t in trades:
+                session.add(
+                    TradeRecord(
+                        symbol=t.symbol,
+                        strategy=t.strategy,
+                        entry_time=t.entry_time,
+                        exit_time=t.exit_time,
+                        qty=t.qty,
+                        entry_px=t.entry_px,
+                        exit_px=t.exit_px,
+                        pnl=t.pnl,
+                        pnl_pct=t.pnl_pct,
+                        holding_period_hours=t.holding_period_hours,
+                        entry_reason=t.entry_reason,
+                        exit_reason=t.exit_reason,
+                    )
+                )
+            session.commit()
+        logger.info("Rebuilt trades table: %d realized trade(s).", len(trades))
+        return len(trades)
+
+    def recent_trades(self, limit: int = 50) -> list[TradeRecord]:
+        return self._recent(TradeRecord, limit)
+
+    def strategy_report(self) -> dict[str, StrategyStats]:
+        """Per-strategy realized-P&L stats, computed fresh from order fills."""
+        from src.journal.trades import build_trades, summarize_by_strategy
+
+        return summarize_by_strategy(build_trades(self._all_orders()))
+
+    def _all_orders(self) -> list[OrderRecord]:
+        with self._session_factory() as session:
+            return list(session.scalars(select(OrderRecord).order_by(OrderRecord.id.asc())))
 
     def _recent(self, model: type[ModelT], limit: int) -> list[ModelT]:
         with self._session_factory() as session:

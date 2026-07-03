@@ -288,6 +288,7 @@ class TradingLoop:
             self.broker.close_position(symbol)
             self.journal.record_order(
                 symbol=symbol,
+                strategy=self.strategy.name,
                 side="sell",
                 qty=position.qty,
                 status="submitted",
@@ -322,6 +323,7 @@ class TradingLoop:
             self.broker.close_position(symbol)
             self.journal.record_order(
                 symbol=symbol,
+                strategy=self.strategy.name,
                 side="sell",
                 qty=position.qty,
                 status="submitted",
@@ -367,6 +369,7 @@ class TradingLoop:
         recon = self._reconciler.wait_for_terminal(order.id)
         self.journal.record_order(
             symbol=symbol,
+            strategy=self.strategy.name,
             side="buy",
             qty=qty,
             status=recon.status,
@@ -402,6 +405,7 @@ class TradingLoop:
             self.broker.close_position(symbol)
             self.journal.record_order(
                 symbol=symbol,
+                strategy=self.strategy.name,
                 side="sell",
                 qty=pos.qty,
                 status="submitted",

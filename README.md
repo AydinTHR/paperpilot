@@ -33,6 +33,12 @@ making money.
   (weekends, holidays, half-days), computed offline from the exchange calendar.
 - **Event-driven backtesting.** Backtests that account for commission and slippage, with
   results written to CSV.
+- **Walk-forward validation.** Optimize parameters in-sample, validate on unseen
+  out-of-sample windows (anchored or rolling), and get a Walk-Forward Efficiency verdict
+  that flags overfit parameter sets: `python scripts/run_walkforward.py --symbol AAPL`.
+- **Realized P&L attribution.** Orders are FIFO-paired into a trades table from actual
+  fills; `python scripts/run_live.py --trades-report` prints per-strategy win rate,
+  profit factor, and total realized P&L.
 - **Risk management and kill switch.** Per-position cap, a daily-loss kill switch, a sticky
   max-drawdown halt, and per-trade stop-loss distance.
 - **Broker-held stops and real fills.** Entries carry a broker-held protective stop (OTO),

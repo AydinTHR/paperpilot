@@ -15,6 +15,7 @@ structured :class:`BacktestResult` with headline metrics and the equity curve.
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -92,6 +93,61 @@ class BacktestResult:
         }
 
 
+def _step(
+    bt_self: BtStrategy,
+    pp_strategy: Strategy,
+    full_df: pd.DataFrame,
+    default_size: float,
+    risk: RiskManager | None,
+) -> None:
+    """One bar of the adapter loop, shared by both adapter flavours.
+
+    Long-only (v1): BUY opens a position when flat, SELL closes it, HOLD does
+    nothing. The window handed to ``generate_signals`` is sliced to the current
+    bar count, which guarantees no look-ahead regardless of engine internals.
+    """
+    price = float(bt_self.data.Close[-1])
+
+    if risk is not None:
+        risk.update_equity(bt_self.equity, now=bt_self.data.index[-1])
+        if risk.halted:
+            if bt_self.position:
+                bt_self.position.close()
+            return
+
+    window = full_df.iloc[: len(bt_self.data)]
+    signal = pp_strategy.generate_signals(window)
+
+    if signal.action is Action.BUY and not bt_self.position.is_long:
+        _enter(bt_self, price, signal.size_hint, default_size, risk)
+    elif signal.action is Action.SELL and bt_self.position:
+        bt_self.position.close()
+    # Action.HOLD -> do nothing
+
+
+def _enter(
+    bt_self: BtStrategy,
+    price: float,
+    size_hint: float | None,
+    default_size: float,
+    risk: RiskManager | None,
+) -> None:
+    if risk is None:
+        frac = size_hint if size_hint is not None else default_size
+        bt_self.buy(size=max(min(frac, 0.99), 0.001))
+        return
+
+    # When flat, equity is effectively all cash, so it doubles as the
+    # cash bound for sizing.
+    qty = risk.position_size(bt_self.equity, price, bt_self.equity, size_hint)
+    if qty < 1:
+        return
+    if risk.limits.stop_loss_pct > 0:
+        bt_self.buy(size=qty, sl=risk.stop_price(price))
+    else:
+        bt_self.buy(size=qty)
+
+
 def _build_adapter(
     pp_strategy: Strategy,
     full_df: pd.DataFrame,
@@ -99,10 +155,6 @@ def _build_adapter(
     risk: RiskManager | None = None,
 ) -> type[BtStrategy]:
     """Create a ``backtesting.Strategy`` subclass that delegates to ``pp_strategy``.
-
-    Long-only (v1): BUY opens a position when flat, SELL closes it, HOLD does
-    nothing. The window handed to ``generate_signals`` is sliced to the current
-    bar count, which guarantees no look-ahead regardless of engine internals.
 
     When a :class:`~src.risk.manager.RiskManager` is supplied, it governs every
     entry: it updates its equity statistics each bar, force-closes the position
@@ -115,43 +167,43 @@ def _build_adapter(
             pass
 
         def next(self) -> None:
-            price = float(self.data.Close[-1])
-
-            if risk is not None:
-                risk.update_equity(self.equity, now=self.data.index[-1])
-                if risk.halted:
-                    if self.position:
-                        self.position.close()
-                    return
-
-            window = full_df.iloc[: len(self.data)]
-            signal = pp_strategy.generate_signals(window)
-
-            if signal.action is Action.BUY and not self.position.is_long:
-                self._enter(price, signal.size_hint)
-            elif signal.action is Action.SELL and self.position:
-                self.position.close()
-            # Action.HOLD -> do nothing
-
-        def _enter(self, price: float, size_hint: float | None) -> None:
-            if risk is None:
-                frac = size_hint if size_hint is not None else default_size
-                self.buy(size=max(min(frac, 0.99), 0.001))
-                return
-
-            # When flat, equity is effectively all cash, so it doubles as the
-            # cash bound for sizing.
-            qty = risk.position_size(self.equity, price, self.equity, size_hint)
-            if qty < 1:
-                return
-            if risk.limits.stop_loss_pct > 0:
-                self.buy(size=qty, sl=risk.stop_price(price))
-            else:
-                self.buy(size=qty)
+            _step(self, pp_strategy, full_df, default_size, risk)
 
     _Adapter.__name__ = f"Adapter[{pp_strategy.name}]"
     _Adapter.__qualname__ = _Adapter.__name__
     return _Adapter
+
+
+def _build_param_adapter(
+    factory: Callable[..., Strategy],
+    full_df: pd.DataFrame,
+    default_size: float,
+    risk: RiskManager | None,
+    params: dict[str, object],
+) -> type[BtStrategy]:
+    """An adapter whose strategy is rebuilt from class-attribute params.
+
+    ``Backtest.optimize`` varies parameters by mutating class attributes, so
+    each declared param lives on the class and ``init()`` constructs a fresh
+    PaperPilot strategy from their current values. The exact live
+    ``generate_signals`` code still runs each bar via the same expanding-window
+    slice, preserving the no-look-ahead guarantee.
+    """
+    param_names = tuple(params)
+
+    class _ParamAdapter(BtStrategy):
+        def init(self) -> None:
+            values = {name: getattr(self, name) for name in param_names}
+            self._pp_strategy = factory(**values)
+
+        def next(self) -> None:
+            _step(self, self._pp_strategy, full_df, default_size, risk)
+
+    for name, default in params.items():
+        setattr(_ParamAdapter, name, default)
+    _ParamAdapter.__name__ = "ParamAdapter"
+    _ParamAdapter.__qualname__ = _ParamAdapter.__name__
+    return _ParamAdapter
 
 
 def _coerce_float(value: object, default: float = 0.0) -> float:

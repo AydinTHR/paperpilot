@@ -209,3 +209,39 @@ def test_arm_report_aggregates_journal() -> None:
     assert report.num_trades == 1
     assert report.win_rate_pct == pytest.approx(100.0)
     assert report.sharpe is None  # < 20 ticks -> insufficient data
+
+
+# --- --fresh: archiving stale arm journals ---------------------------------------
+
+
+def test_archive_arm_journals_renames_existing(tmp_path) -> None:
+    from src.experiments.harness import archive_arm_journals
+
+    settings = Settings(
+        _env_file=None,  # type: ignore[arg-type]
+        db_url=f"sqlite:///{tmp_path}/paperpilot.db",
+    )
+    arm_dir = tmp_path / "experiments"
+    arm_dir.mkdir()
+    (arm_dir / "sma.db").write_bytes(b"stale")
+    (arm_dir / "rsi.db").write_bytes(b"stale")
+
+    archived = archive_arm_journals(settings, ["sma", "rsi", "llm"])
+
+    assert len(archived) == 2  # llm had no journal -> nothing to archive
+    assert not (arm_dir / "sma.db").exists()
+    assert not (arm_dir / "rsi.db").exists()
+    for target in archived:
+        assert target.exists()
+        assert target.name.endswith(".bak")
+        assert target.read_bytes() == b"stale"  # renamed, never deleted
+
+
+def test_archive_arm_journals_noop_when_clean(tmp_path) -> None:
+    from src.experiments.harness import archive_arm_journals
+
+    settings = Settings(
+        _env_file=None,  # type: ignore[arg-type]
+        db_url=f"sqlite:///{tmp_path}/paperpilot.db",
+    )
+    assert archive_arm_journals(settings, ["sma", "rsi", "llm"]) == []

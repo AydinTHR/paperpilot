@@ -21,7 +21,9 @@ per-bar response cache so re-runs cost zero API dollars.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -338,6 +340,29 @@ def _arm_db_url(base_db_url: str, arm_name: str) -> str:
         target = base.parent / "experiments" / f"{arm_name}.db"
         return f"sqlite:///{target}"
     return base_db_url  # non-sqlite: shared db; strategy tags keep rows apart
+
+
+def archive_arm_journals(settings: Settings, strategies: Sequence[str]) -> list[Path]:
+    """Move existing arm journals aside so a new experiment starts clean.
+
+    Arm reports baseline against the journal's first equity snapshot, so mixing
+    runs in one file corrupts the numbers (a virtual-mode allocation followed by
+    an accounts-mode tick reads as a huge return). Files are renamed with a
+    timestamped ``.bak`` suffix, never deleted.
+    """
+    archived: list[Path] = []
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
+    for key in strategies:
+        url = _arm_db_url(settings.db_url, key)
+        if not url.startswith("sqlite:///"):
+            continue
+        path = Path(url.removeprefix("sqlite:///"))
+        if path.exists():
+            target = path.with_name(f"{path.name}.{stamp}.bak")
+            path.rename(target)
+            archived.append(target)
+            logger.info("Archived arm journal %s -> %s", path, target)
+    return archived
 
 
 def _build_strategy(key: str, settings: Settings, journal: Journal) -> Strategy:

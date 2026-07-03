@@ -23,7 +23,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from config.logging_config import get_logger
 
@@ -31,6 +31,24 @@ if TYPE_CHECKING:
     from config.settings import Settings
 
 logger = get_logger(__name__)
+
+
+class HaltStore(Protocol):
+    """Where halt transitions are persisted (the Journal satisfies this).
+
+    A structural Protocol keeps the risk core pure: it never imports SQLAlchemy
+    or the journal package, and tests use an in-memory fake.
+    """
+
+    def record_halt(
+        self,
+        *,
+        halt_type: str,
+        active: bool,
+        reason: str,
+        triggered_at: datetime,
+        equity_at_halt: float,
+    ) -> int: ...
 
 
 @dataclass(frozen=True)
@@ -83,7 +101,13 @@ class RiskManager:
     :meth:`reset` is called.
     """
 
-    def __init__(self, limits: RiskLimits, starting_equity: float) -> None:
+    def __init__(
+        self,
+        limits: RiskLimits,
+        starting_equity: float,
+        *,
+        halt_store: HaltStore | None = None,
+    ) -> None:
         if starting_equity <= 0:
             raise ValueError(f"starting_equity must be positive, got {starting_equity}")
         self.limits = limits
@@ -92,10 +116,36 @@ class RiskManager:
         self._day_start_equity = starting_equity
         self._daily_tripped = False
         self._drawdown_halt = False
+        self._halt_store = halt_store
 
     @classmethod
-    def from_settings(cls, settings: Settings, starting_equity: float) -> RiskManager:
-        return cls(RiskLimits.from_settings(settings), starting_equity)
+    def from_settings(
+        cls,
+        settings: Settings,
+        starting_equity: float,
+        *,
+        halt_store: HaltStore | None = None,
+    ) -> RiskManager:
+        return cls(RiskLimits.from_settings(settings), starting_equity, halt_store=halt_store)
+
+    def restore(
+        self,
+        *,
+        drawdown_halt: bool = False,
+        daily_tripped: bool = False,
+        day: date | None = None,
+    ) -> None:
+        """Re-latch persisted halt state after a process restart.
+
+        Restoring the daily trip must also set the trip's calendar day,
+        otherwise the next :meth:`update_equity` sees a "new day" and clears
+        it immediately.
+        """
+        if drawdown_halt:
+            self._drawdown_halt = True
+        if daily_tripped:
+            self._daily_tripped = True
+            self._current_day = day or datetime.now().date()
 
     def seed_peak(self, equity: float) -> None:
         """Raise the tracked peak to ``equity`` if higher (never lowers it).
@@ -172,6 +222,13 @@ class RiskManager:
                     daily_loss * 100.0,
                     self.limits.max_daily_loss_pct * 100.0,
                 )
+                self._persist(
+                    "daily_loss",
+                    active=True,
+                    reason=f"down {daily_loss:.2%} on the day",
+                    now=now,
+                    equity=equity,
+                )
 
         if self._peak_equity > 0 and not self._drawdown_halt:
             drawdown = (self._peak_equity - equity) / self._peak_equity
@@ -182,6 +239,13 @@ class RiskManager:
                     "Trading halted until manual reset.",
                     drawdown * 100.0,
                     self.limits.max_drawdown_pct * 100.0,
+                )
+                self._persist(
+                    "drawdown",
+                    active=True,
+                    reason=f"{drawdown:.2%} below peak",
+                    now=now,
+                    equity=equity,
                 )
 
     def can_enter(self) -> RiskDecision:
@@ -202,10 +266,40 @@ class RiskManager:
         """Human-readable reason for the active halt, or '' if not halted."""
         return self.can_enter().reason if self.halted else ""
 
-    def reset(self) -> None:
-        """Clear both halts (operator action after reviewing a drawdown event)."""
+    def reset(self, *, reason: str = "manual reset") -> None:
+        """Clear both halts (operator action after reviewing a drawdown event).
+
+        Both types are journaled as cleared so the persisted latest-state view
+        converges with memory.
+        """
         self._daily_tripped = False
         self._drawdown_halt = False
+        for halt_type in ("daily_loss", "drawdown"):
+            self._persist(halt_type, active=False, reason=reason, now=None, equity=0.0)
+
+    def _persist(
+        self,
+        halt_type: str,
+        *,
+        active: bool,
+        reason: str,
+        now: datetime | date | None,
+        equity: float,
+    ) -> None:
+        """Best-effort halt persistence; a store failure never breaks risk logic."""
+        if self._halt_store is None:
+            return
+        triggered = now if isinstance(now, datetime) else datetime.now()
+        try:
+            self._halt_store.record_halt(
+                halt_type=halt_type,
+                active=active,
+                reason=reason,
+                triggered_at=triggered,
+                equity_at_halt=equity,
+            )
+        except Exception as exc:
+            logger.warning("Could not persist %s halt state: %s", halt_type, exc)
 
     def state(self) -> dict[str, object]:
         """A flat, log-friendly snapshot of the manager's internal state."""

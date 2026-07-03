@@ -8,7 +8,7 @@ insufficient-bars skip -- without any network, SDK, or real money.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -596,3 +596,68 @@ def test_loop_stop_backstops_when_no_live_stop_order() -> None:
     result = loop.run_once(now=NOW)
     assert broker.closed == ["AAPL"]
     assert result.outcomes[0].action == "STOP"
+
+
+# --- persisted halt restoration on startup -------------------------------------
+
+
+class _HealthyBroker:
+    def __init__(self, settings, announce: bool = True) -> None:
+        pass
+
+    def get_account(self) -> AccountSnapshot:
+        return AccountSnapshot(
+            account_number="TEST",
+            status="ACTIVE",
+            currency="USD",
+            cash=100_000.0,
+            equity=100_000.0,
+            buying_power=200_000.0,
+            portfolio_value=100_000.0,
+        )
+
+
+def _patched_from_settings(monkeypatch, journal):
+    monkeypatch.setattr("src.agent.loop.Broker", _HealthyBroker)
+    monkeypatch.setattr("src.agent.loop.build_provider", lambda settings: object())
+    return TradingLoop.from_settings(
+        Settings(),
+        strategy=_StubStrategy(Signal(Action.HOLD)),
+        journal=journal,
+        market_hours_gate=False,
+    )
+
+
+def test_from_settings_restores_persisted_drawdown_halt(monkeypatch) -> None:
+    journal = Journal("sqlite:///:memory:")
+    journal.record_halt(halt_type="drawdown", active=True, reason="21% below peak")
+    loop = _patched_from_settings(monkeypatch, journal)
+    assert loop.risk.halted
+    assert loop.risk.can_enter().reason == "max-drawdown halt active"
+
+
+def test_from_settings_ignores_cleared_halt(monkeypatch) -> None:
+    journal = Journal("sqlite:///:memory:")
+    journal.record_halt(halt_type="drawdown", active=True, reason="tripped")
+    journal.record_halt(halt_type="drawdown", active=False, reason="manual reset")
+    loop = _patched_from_settings(monkeypatch, journal)
+    assert not loop.risk.halted
+
+
+def test_from_settings_ignores_stale_daily_trip(monkeypatch) -> None:
+    journal = Journal("sqlite:///:memory:")
+    yesterday = datetime.now(UTC).replace(hour=12) - timedelta(days=1)
+    journal.record_halt(
+        halt_type="daily_loss", active=True, reason="down 4%", triggered_at=yesterday
+    )
+    loop = _patched_from_settings(monkeypatch, journal)
+    assert not loop.risk.halted  # yesterday's trip does not carry over
+
+
+def test_from_settings_restores_todays_daily_trip(monkeypatch) -> None:
+    journal = Journal("sqlite:///:memory:")
+    journal.record_halt(
+        halt_type="daily_loss", active=True, reason="down 4%", triggered_at=datetime.now(UTC)
+    )
+    loop = _patched_from_settings(monkeypatch, journal)
+    assert loop.risk.halted

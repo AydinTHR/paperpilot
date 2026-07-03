@@ -159,10 +159,29 @@ class TradingLoop:
                 f"start the trading loop on an empty account. Reset your Alpaca {mode} "
                 f"account balance in the dashboard (https://app.alpaca.markets) first."
             )
-        risk = RiskManager.from_settings(settings, starting_equity=account.equity)
+        risk = RiskManager.from_settings(
+            settings, starting_equity=account.equity, halt_store=journal
+        )
         peak = journal.peak_equity()
         if peak is not None:
             risk.seed_peak(peak)
+
+        # Restore persisted halts so a restart cannot silently resume trading.
+        # The drawdown halt is sticky across any gap; the daily trip only
+        # belongs to the calendar day it fired on.
+        states = journal.latest_halt_states()
+        drawdown = states.get("drawdown")
+        if drawdown is not None and drawdown.active:
+            risk.restore(drawdown_halt=True)
+            logger.warning("Restored persisted max-drawdown halt (%s).", drawdown.reason)
+        daily = states.get("daily_loss")
+        if (
+            daily is not None
+            and daily.active
+            and daily.triggered_at.date() == datetime.now(UTC).date()
+        ):
+            risk.restore(daily_tripped=True, day=daily.triggered_at.date())
+            logger.warning("Restored persisted daily-loss kill switch (%s).", daily.reason)
 
         gate = settings.market_hours_only if market_hours_gate is None else market_hours_gate
         return cls(

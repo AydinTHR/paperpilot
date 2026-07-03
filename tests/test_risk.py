@@ -217,3 +217,77 @@ def test_state_snapshot_keys() -> None:
         assert key in state
     assert state["halted"] is False
     assert state["current_day"] == "2026-01-02"
+
+
+# --- halt persistence hooks ----------------------------------------------------
+
+
+class _RecordingHaltStore:
+    def __init__(self, *, raises: bool = False) -> None:
+        self.events: list[dict] = []
+        self.raises = raises
+
+    def record_halt(self, **kwargs) -> int:
+        if self.raises:
+            raise ConnectionError("db down")
+        self.events.append(kwargs)
+        return len(self.events)
+
+
+def test_daily_trip_is_persisted() -> None:
+    store = _RecordingHaltStore()
+    manager = RiskManager(_limits(), 100_000.0, halt_store=store)
+    manager.update_equity(100_000.0, now=datetime(2026, 1, 5, 15, 0))
+    manager.update_equity(96_000.0, now=datetime(2026, 1, 5, 16, 0))  # -4% > 3%
+    assert manager.halted
+    assert len(store.events) == 1
+    event = store.events[0]
+    assert event["halt_type"] == "daily_loss"
+    assert event["active"] is True
+    assert event["equity_at_halt"] == 96_000.0
+
+
+def test_drawdown_trip_is_persisted() -> None:
+    store = _RecordingHaltStore()
+    manager = RiskManager(_limits(), 100_000.0, halt_store=store)
+    manager.update_equity(100_000.0, now=datetime(2026, 1, 5))
+    manager.update_equity(79_000.0, now=datetime(2026, 1, 6))  # -21% > 20%
+    types = [e["halt_type"] for e in store.events]
+    assert "drawdown" in types
+
+
+def test_reset_persists_both_types_cleared() -> None:
+    store = _RecordingHaltStore()
+    manager = RiskManager(_limits(), 100_000.0, halt_store=store)
+    manager.reset()
+    cleared = {e["halt_type"]: e["active"] for e in store.events}
+    assert cleared == {"daily_loss": False, "drawdown": False}
+
+
+def test_store_failure_never_breaks_risk_logic() -> None:
+    manager = RiskManager(_limits(), 100_000.0, halt_store=_RecordingHaltStore(raises=True))
+    manager.update_equity(100_000.0, now=datetime(2026, 1, 5))
+    manager.update_equity(70_000.0, now=datetime(2026, 1, 5))  # trips both
+    assert manager.halted  # halt logic intact despite the store exploding
+
+
+def test_restore_relatches_halts() -> None:
+    manager = RiskManager(_limits(), 100_000.0)
+    manager.restore(drawdown_halt=True)
+    assert manager.halted
+    assert manager.can_enter().reason == "max-drawdown halt active"
+
+
+def test_restored_daily_trip_survives_same_day_update() -> None:
+    manager = RiskManager(_limits(), 100_000.0)
+    day = datetime(2026, 1, 5)
+    manager.restore(daily_tripped=True, day=day.date())
+    manager.update_equity(100_000.0, now=day)  # same day -> must stay tripped
+    assert manager.halted
+
+
+def test_restored_daily_trip_clears_on_next_day() -> None:
+    manager = RiskManager(_limits(), 100_000.0)
+    manager.restore(daily_tripped=True, day=datetime(2026, 1, 5).date())
+    manager.update_equity(100_000.0, now=datetime(2026, 1, 6))  # rollover
+    assert not manager.halted

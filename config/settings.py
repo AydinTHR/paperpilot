@@ -126,6 +126,11 @@ class Settings(BaseSettings):
         description="Attach broker-held protective stops (OTO) to entries. "
         "Unset resolves to true when Alpaca credentials are present.",
     )
+    use_trade_stream: bool = Field(
+        default=False,
+        description="Run the optional websocket fill listener beside the "
+        "scheduled loop to reconcile fills that land between ticks.",
+    )
 
     # --- Live loop & trade journal ---
     default_strategy: str = Field(
@@ -280,6 +285,7 @@ class Settings(BaseSettings):
             "alpaca_data_feed": self.alpaca_data_feed,
             "market_hours_only": self.market_hours_only,
             "use_broker_stops": self.resolved_use_broker_stops,
+            "use_trade_stream": self.use_trade_stream,
             "default_strategy": self.default_strategy,
             "loop_interval_minutes": self.loop_interval_minutes,
             "llm_provider": self.llm_provider,

@@ -176,7 +176,12 @@ def main(argv: list[str] | None = None) -> int:
         _print_result(result)
         return 0
 
-    # Scheduled mode (blocks until Ctrl-C).
+    # Optional websocket fill listener (off by default), then scheduled mode
+    # (blocks until Ctrl-C).
+    if settings.use_trade_stream:
+        from src.execution.trade_stream import TradeStreamListener
+
+        TradeStreamListener(settings, loop.journal).start()
     loop.run_scheduled(args.interval)
     return 0
 

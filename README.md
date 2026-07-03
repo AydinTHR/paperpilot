@@ -35,6 +35,9 @@ making money.
   results written to CSV.
 - **Risk management and kill switch.** Per-position cap, a daily-loss kill switch, a sticky
   max-drawdown halt, and per-trade stop-loss distance.
+- **Broker-held stops and real fills.** Entries carry a broker-held protective stop (OTO),
+  so positions stay protected between ticks; every order is polled to its terminal state
+  and the journal records the actual fill price and quantity.
 - **Scheduled live paper loop.** A blocking scheduler runs the strategy on an interval and
   records every decision and fill to a SQLite trade journal.
 - **Optional LLM signal layer.** A provider-agnostic adapter (Claude wired) that can supply

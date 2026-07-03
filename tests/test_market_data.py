@@ -12,7 +12,8 @@ import pandas as pd
 import pytest
 
 from config.settings import Settings
-from src.data.market_data import OHLCV_COLUMNS, YFinanceProvider, _normalize
+from src.data.alpaca_data import AlpacaDataProvider
+from src.data.market_data import OHLCV_COLUMNS, YFinanceProvider, _normalize, build_provider
 from src.data.universe import DEFAULT_UNIVERSE, get_universe
 
 # --- helpers ---------------------------------------------------------------
@@ -117,6 +118,35 @@ def test_unsupported_interval_rejected(tmp_path) -> None:
     provider = YFinanceProvider(_settings(tmp_path), downloader=_FakeDownloader(_flat_frame()))
     with pytest.raises(ValueError):
         provider.get_latest_bars("AAPL", lookback=10, interval="5m")
+
+
+# --- build_provider ----------------------------------------------------------
+
+
+def test_build_provider_defaults_to_yfinance_without_credentials(tmp_path) -> None:
+    provider = build_provider(_settings(tmp_path))  # auto + no creds
+    assert isinstance(provider, YFinanceProvider)
+
+
+def test_build_provider_auto_picks_alpaca_with_credentials(tmp_path) -> None:
+    settings = Settings(
+        _env_file=None,  # type: ignore[arg-type]
+        data_cache_dir=str(tmp_path),
+        alpaca_api_key="key",
+        alpaca_secret_key="secret",
+    )
+    assert isinstance(build_provider(settings), AlpacaDataProvider)
+
+
+def test_build_provider_explicit_override_wins(tmp_path) -> None:
+    settings = Settings(
+        _env_file=None,  # type: ignore[arg-type]
+        data_cache_dir=str(tmp_path),
+        alpaca_api_key="key",
+        alpaca_secret_key="secret",
+        data_provider="yfinance",
+    )
+    assert isinstance(build_provider(settings), YFinanceProvider)
 
 
 # --- universe --------------------------------------------------------------

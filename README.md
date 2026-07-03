@@ -25,8 +25,12 @@ making money.
 
 - **Config and broker connection.** Typed settings via `pydantic-settings`, a safe Alpaca
   paper connection, and a one-command account check.
-- **Market data and strategies.** Cached OHLCV bars (local parquet), reusable indicators,
-  and a small strategy interface with SMA-crossover and RSI mean-reversion examples.
+- **Market data and strategies.** Alpaca-fed OHLCV bars by default (same source as
+  execution, so signals and fills never drift), with yfinance as the zero-key fallback
+  (`DATA_PROVIDER=yfinance`), a local parquet cache, reusable indicators, and a small
+  strategy interface with SMA-crossover and RSI mean-reversion examples.
+- **Market-hours awareness.** The scheduled loop skips ticks while the NYSE is closed
+  (weekends, holidays, half-days), computed offline from the exchange calendar.
 - **Event-driven backtesting.** Backtests that account for commission and slippage, with
   results written to CSV.
 - **Risk management and kill switch.** Per-position cap, a daily-loss kill switch, a sticky
@@ -79,7 +83,7 @@ A layered `src/` package keeps each concern testable in isolation:
 
 ```
 src/
-  data/        market data fetch + local cache, trading universe
+  data/        market data providers (Alpaca, yfinance) + shared cache, universe
   strategy/    strategy interface, indicators, SMA/RSI examples, optional LLM layer
   backtest/    event-driven engine with costs and slippage
   execution/   Alpaca broker adapter (paper by default)

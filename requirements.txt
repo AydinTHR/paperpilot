@@ -5,13 +5,16 @@
 pydantic>=2.13.4,<3
 pydantic-settings>=2.14.2,<3
 python-dotenv>=1.2.2,<2
-alpaca-py>=0.33,<1
+# Pinned to one minor: alpaca-py minors have shipped breaking changes before.
+alpaca-py>=0.43,<0.44
 
 # --- Phase 2: market data + strategy/indicators ---
 yfinance>=1.5.1,<2
 pandas>=2.2,<3
 numpy>=2.4.6,<3
 pyarrow>=15
+# NYSE session times (holidays, half-days) for the market-hours gate; offline.
+pandas-market-calendars>=5.4,<6
 
 # --- Phase 3: backtesting engine ---
 backtesting>=0.3.3,<1

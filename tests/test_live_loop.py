@@ -349,7 +349,7 @@ def test_from_settings_rejects_zero_equity(monkeypatch) -> None:
 
     # Patch the broker + data provider the factory builds so no network/SDK runs.
     monkeypatch.setattr("src.agent.loop.Broker", _ZeroBroker)
-    monkeypatch.setattr("src.agent.loop.YFinanceProvider", lambda settings: object())
+    monkeypatch.setattr("src.agent.loop.build_provider", lambda settings: object())
 
     with pytest.raises(BrokerError, match="equity"):
         TradingLoop.from_settings(
@@ -357,3 +357,80 @@ def test_from_settings_rejects_zero_equity(monkeypatch) -> None:
             strategy=_StubStrategy(Signal(Action.HOLD)),
             journal=Journal("sqlite:///:memory:"),
         )
+
+
+# --- scheduled_tick: market-hours gate + crash containment -------------------
+
+
+class _StubCalendar:
+    def __init__(self, is_open: bool) -> None:
+        self._open = is_open
+
+    def is_market_open(self, now=None) -> bool:
+        return self._open
+
+    def next_session_open(self, now=None):
+        return None
+
+
+class _ExplodingBroker:
+    def get_account(self):
+        raise RuntimeError("boom")
+
+    def get_positions(self):  # pragma: no cover - never reached
+        return []
+
+
+def test_scheduled_tick_skipped_when_market_closed() -> None:
+    broker = _FakeBroker(equity=100_000.0, cash=100_000.0)
+    journal = Journal("sqlite:///:memory:")
+    loop = _loop(
+        broker,
+        _FakeProvider(_bars()),
+        _StubStrategy(Signal(Action.BUY, confidence=1.0)),
+        symbols=["AAPL"],
+        journal=journal,
+    )
+    loop.market_calendar = _StubCalendar(is_open=False)
+
+    assert loop.scheduled_tick() is None
+    assert broker.orders == []  # nothing traded
+    assert journal.counts()["equity_snapshots"] == 0  # run_once never started
+
+
+def test_scheduled_tick_runs_when_market_open() -> None:
+    broker = _FakeBroker(equity=100_000.0, cash=100_000.0)
+    loop = _loop(
+        broker,
+        _FakeProvider(_bars()),
+        _StubStrategy(Signal(Action.HOLD)),
+        symbols=["AAPL"],
+    )
+    loop.market_calendar = _StubCalendar(is_open=True)
+
+    result = loop.scheduled_tick()
+    assert result is not None
+    assert result.halted is False
+
+
+def test_scheduled_tick_ungated_without_calendar() -> None:
+    broker = _FakeBroker(equity=100_000.0, cash=100_000.0)
+    loop = _loop(
+        broker,
+        _FakeProvider(_bars()),
+        _StubStrategy(Signal(Action.HOLD)),
+        symbols=["AAPL"],
+    )
+    assert loop.market_calendar is None
+    assert loop.scheduled_tick() is not None
+
+
+def test_scheduled_tick_contains_exceptions() -> None:
+    loop = _loop(
+        _ExplodingBroker(),
+        _FakeProvider(_bars()),
+        _StubStrategy(Signal(Action.HOLD)),
+        symbols=["AAPL"],
+    )
+    # A tick failure is logged and swallowed so the scheduler keeps running.
+    assert loop.scheduled_tick() is None

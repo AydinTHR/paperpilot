@@ -349,7 +349,7 @@ def test_from_settings_rejects_zero_equity(monkeypatch) -> None:
 
     # Patch the broker + data provider the factory builds so no network/SDK runs.
     monkeypatch.setattr("src.agent.loop.Broker", _ZeroBroker)
-    monkeypatch.setattr("src.agent.loop.YFinanceProvider", lambda settings: object())
+    monkeypatch.setattr("src.agent.loop.build_provider", lambda settings: object())
 
     with pytest.raises(BrokerError, match="equity"):
         TradingLoop.from_settings(

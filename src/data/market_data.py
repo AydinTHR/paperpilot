@@ -46,6 +46,22 @@ class MarketDataProvider(Protocol):
     def get_latest_bars(self, symbol: str, lookback: int, interval: str = "1d") -> pd.DataFrame: ...
 
 
+def build_provider(settings: Settings | None = None) -> MarketDataProvider:
+    """Return the provider selected by ``settings.data_provider``.
+
+    ``auto`` resolves to Alpaca when Alpaca credentials are configured and
+    yfinance otherwise, so a fresh clone with no keys still works out of the
+    box. ``DATA_PROVIDER=yfinance`` is the one-line rollback.
+    """
+    settings = settings or get_settings()
+    if settings.resolved_data_provider == "alpaca":
+        # Imported lazily: alpaca_data imports from this module.
+        from src.data.alpaca_data import AlpacaDataProvider
+
+        return AlpacaDataProvider(settings)
+    return YFinanceProvider(settings)
+
+
 def _normalize(df: pd.DataFrame) -> pd.DataFrame:
     """Coerce a raw yfinance frame to the canonical OHLCV schema.
 

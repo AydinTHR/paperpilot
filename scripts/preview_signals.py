@@ -19,7 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from config.logging_config import get_logger, setup_logging
 from config.settings import get_settings
-from src.data.market_data import YFinanceProvider
+from src.data.market_data import build_provider
 from src.strategy.base import Strategy
 from src.strategy.examples.mean_reversion import RsiMeanReversion
 from src.strategy.examples.sma_crossover import SmaCrossover
@@ -67,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
     interval = args.interval or settings.default_interval
     symbol = args.symbol.upper()
 
-    provider = YFinanceProvider(settings)
+    provider = build_provider(settings)
     try:
         bars = provider.get_latest_bars(symbol, lookback=args.lookback, interval=interval)
     except Exception as exc:

@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from config.logging_config import get_logger
 from config.settings import Settings, get_settings
-from src.data.market_data import YFinanceProvider
+from src.data.market_data import build_provider
 from src.execution.broker import AccountSnapshot, Broker, BrokerError, OrderInfo, PositionInfo
 from src.journal.store import Journal
 from src.risk.manager import RiskManager
@@ -119,7 +119,7 @@ class TradingLoop:
 
         settings = settings or get_settings()
         broker = Broker(settings, announce=announce)
-        provider = YFinanceProvider(settings)
+        provider = build_provider(settings)
         journal = journal or Journal(settings.db_url)
 
         account = broker.get_account()

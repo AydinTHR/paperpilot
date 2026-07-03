@@ -23,7 +23,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config.logging_config import get_logger, setup_logging
 from config.settings import get_settings
 from src.backtest.engine import BacktestConfig, BacktestResult, run_backtest
-from src.data.market_data import YFinanceProvider
+from src.data.market_data import build_provider
 from src.risk.manager import RiskManager
 from src.strategy.base import Strategy
 from src.strategy.examples.mean_reversion import RsiMeanReversion
@@ -123,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
         position_size=args.size,
     )
 
-    provider = YFinanceProvider(settings)
+    provider = build_provider(settings)
     try:
         if args.start and args.end:
             bars = provider.get_bars(symbol, args.start, args.end, interval)

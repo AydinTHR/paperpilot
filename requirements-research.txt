@@ -1,0 +1,6 @@
+# Optional research stack: model-based optimization for walk-forward analysis.
+# Install with: pip install -r requirements-research.txt
+-r requirements.txt
+
+# Enables Backtest.optimize(method="sambo"); the default grid search needs nothing extra.
+sambo>=0.1

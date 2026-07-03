@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypeVar
+from typing import TYPE_CHECKING, TypeVar
+
+if TYPE_CHECKING:
+    from src.journal.trades import StrategyStats
 
 from sqlalchemy import Engine, create_engine, func, select
 from sqlalchemy.engine import make_url
@@ -276,11 +279,11 @@ class Journal:
     def recent_trades(self, limit: int = 50) -> list[TradeRecord]:
         return self._recent(TradeRecord, limit)
 
-    def strategy_report(self) -> dict[str, object]:
+    def strategy_report(self) -> dict[str, StrategyStats]:
         """Per-strategy realized-P&L stats, computed fresh from order fills."""
         from src.journal.trades import build_trades, summarize_by_strategy
 
-        return dict(summarize_by_strategy(build_trades(self._all_orders())))
+        return summarize_by_strategy(build_trades(self._all_orders()))
 
     def _all_orders(self) -> list[OrderRecord]:
         with self._session_factory() as session:

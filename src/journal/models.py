@@ -63,6 +63,21 @@ class OrderRecord(Base):
         )
 
 
+class LlmCacheRecord(Base):
+    """Cached LLM responses keyed by (params, prompts) hash."""
+
+    __tablename__ = "llm_cache"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    response: Mapped[str] = mapped_column(String(4096))
+    model: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid
+        return f"LlmCacheRecord(key={self.key[:12]!r}..., model={self.model!r})"
+
+
 class TradeRecord(Base):
     """A realized (entry, exit) trade, FIFO-paired from order fills."""
 

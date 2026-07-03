@@ -132,7 +132,16 @@ class Broker:
         *,
         client: TradingClientProtocol | None = None,
         announce: bool = True,
+        api_key: str | None = None,
+        secret_key: str | None = None,
     ) -> None:
+        """``api_key``/``secret_key`` override the settings credentials.
+
+        Used by the experiment harness to route arms to separate paper
+        accounts. Only the credentials can be overridden -- paper mode and the
+        live-trading gate always come from settings, so a second account can
+        never bypass the gate.
+        """
         self.settings = settings or get_settings()
 
         if announce:
@@ -150,14 +159,16 @@ class Broker:
         if client is not None:
             self._client: TradingClientProtocol = client
         else:
-            if not self.settings.has_credentials:
+            key = api_key or self.settings.alpaca_api_key.get_secret_value()
+            secret = secret_key or self.settings.alpaca_secret_key.get_secret_value()
+            if not (key and secret):
                 raise BrokerError(
                     "Missing Alpaca credentials. Set ALPACA_API_KEY and "
                     "ALPACA_SECRET_KEY in your environment or .env file."
                 )
             self._client = TradingClient(
-                api_key=self.settings.alpaca_api_key.get_secret_value(),
-                secret_key=self.settings.alpaca_secret_key.get_secret_value(),
+                api_key=key,
+                secret_key=secret,
                 paper=self.settings.paper,
             )
 

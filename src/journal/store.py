@@ -25,6 +25,7 @@ from src.journal.models import (
     Base,
     EquitySnapshot,
     HaltStateRecord,
+    LlmCacheRecord,
     OrderRecord,
     SignalRecord,
     TradeRecord,
@@ -239,6 +240,22 @@ class Journal:
         with self._session_factory() as session:
             rows = session.scalars(select(HaltStateRecord).order_by(HaltStateRecord.id.asc()))
             return {row.halt_type: row for row in rows}
+
+    # --- LLM response cache -----------------------------------------------------
+
+    def get_llm_response(self, key: str) -> str | None:
+        with self._session_factory() as session:
+            row = session.scalars(select(LlmCacheRecord).where(LlmCacheRecord.key == key)).first()
+            return row.response if row else None
+
+    def put_llm_response(self, key: str, response: str, *, model: str = "") -> None:
+        with self._session_factory() as session:
+            if session.scalars(select(LlmCacheRecord).where(LlmCacheRecord.key == key)).first():
+                return  # first write wins; identical key implies identical call
+            session.add(
+                LlmCacheRecord(key=key, response=response, model=model, created_at=_utcnow())
+            )
+            session.commit()
 
     # --- realized trades -------------------------------------------------------
 

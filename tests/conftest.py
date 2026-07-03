@@ -7,6 +7,10 @@ import pytest
 _ENV_VARS = [
     "ALPACA_API_KEY",
     "ALPACA_SECRET_KEY",
+    "ALPACA_API_KEY_2",
+    "ALPACA_SECRET_KEY_2",
+    "ALPACA_API_KEY_3",
+    "ALPACA_SECRET_KEY_3",
     "PAPER",
     "ALLOW_LIVE_TRADING",
     "MAX_POSITION_PCT",

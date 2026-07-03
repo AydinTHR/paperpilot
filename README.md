@@ -52,6 +52,10 @@ making money.
   after `pip install -r requirements-dashboard.txt`.
 - **Optional LLM signal layer.** A provider-agnostic adapter (Claude wired) that can supply
   a signal, risk-gated and disabled unless an API key is set.
+- **LLM-vs-classical experiment.** Run SMA, RSI, and the LLM strategy concurrently in
+  isolation (separate paper accounts, or virtual sub-portfolios on one account) and compare
+  realized P&L from actual fills: `python scripts/run_experiment.py --once` then
+  `--report`. LLM responses are cached per bar, so re-runs cost nothing.
 
 ## Quickstart
 

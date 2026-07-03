@@ -25,7 +25,8 @@ from config.logging_config import get_logger
 from config.settings import Settings, get_settings
 from src.strategy.base import Action, Signal, Strategy
 from src.strategy.indicators import rsi, sma
-from src.strategy.llm.client import LlmClient, LlmError, build_llm_client
+from src.strategy.llm.cache import CachedLlmClient, LlmResponseStore, params_hash
+from src.strategy.llm.client import LlmClient, LlmConfig, LlmError, build_llm_client
 
 logger = get_logger(__name__)
 
@@ -55,6 +56,7 @@ class LlmStrategy(Strategy):
         settings: Settings | None = None,
         context_bars: int = 30,
         min_bars: int = 50,
+        response_store: LlmResponseStore | None = None,
     ) -> None:
         self.name = "LLM signal"
         self.settings = settings or get_settings()
@@ -69,6 +71,17 @@ class LlmStrategy(Strategy):
             logger.warning("LLM strategy unavailable: %s", exc)
         if self._client is None and not self._unavailable:
             self._unavailable = "no API key configured"
+
+        if self._client is not None and response_store is not None:
+            # Read-through cache: re-runs over the same bars hit the store
+            # instead of the API (reproducible experiments, zero re-billing).
+            config = LlmConfig.from_settings(self.settings)
+            self._client = CachedLlmClient(
+                self._client,
+                response_store,
+                params_hash(config.model, config.temperature, config.max_tokens, context_bars),
+                model=config.model,
+            )
 
     @property
     def min_bars(self) -> int:

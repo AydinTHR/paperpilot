@@ -55,6 +55,12 @@ class Settings(BaseSettings):
     # --- Alpaca credentials (never logged) ---
     alpaca_api_key: SecretStr = Field(default=SecretStr(""))
     alpaca_secret_key: SecretStr = Field(default=SecretStr(""))
+    # Optional extra paper accounts for experiment arms (Alpaca allows up to
+    # 3); leave blank to fall back to virtual sub-portfolios on one account.
+    alpaca_api_key_2: SecretStr = Field(default=SecretStr(""))
+    alpaca_secret_key_2: SecretStr = Field(default=SecretStr(""))
+    alpaca_api_key_3: SecretStr = Field(default=SecretStr(""))
+    alpaca_secret_key_3: SecretStr = Field(default=SecretStr(""))
 
     # --- Trading mode ---
     paper: bool = Field(
@@ -168,7 +174,7 @@ class Settings(BaseSettings):
         "('anthropic'; other providers reserved).",
     )
     llm_model: str = Field(
-        default="claude-3-5-haiku-latest",
+        default="claude-haiku-4-5",
         description="Model name passed to the LLM provider (override per provider).",
     )
     llm_max_tokens: int = Field(default=512, gt=0, description="Max tokens for the LLM response.")
@@ -267,6 +273,22 @@ class Settings(BaseSettings):
     def has_llm_key(self) -> bool:
         """True when an API key for the configured LLM provider is present."""
         return bool(self.anthropic_api_key.get_secret_value())
+
+    def account_credentials(self, n: int) -> tuple[str, str] | None:
+        """The (api_key, secret_key) pair for paper account ``n`` (1-based).
+
+        Returns None when that slot is not configured, so callers can count
+        how many isolated experiment arms are available.
+        """
+        pairs = {
+            1: (self.alpaca_api_key, self.alpaca_secret_key),
+            2: (self.alpaca_api_key_2, self.alpaca_secret_key_2),
+            3: (self.alpaca_api_key_3, self.alpaca_secret_key_3),
+        }
+        if n not in pairs:
+            return None
+        key, secret = (v.get_secret_value() for v in pairs[n])
+        return (key, secret) if key and secret else None
 
     @property
     def resolved_data_provider(self) -> str:

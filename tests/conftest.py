@@ -47,3 +47,16 @@ def _clean_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Strip PaperPilot env vars so settings tests are deterministic."""
     for var in _ENV_VARS:
         monkeypatch.delenv(var, raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _no_env_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the developer's real .env out of every test's ``Settings()``.
+
+    CI has no .env file; without this, plain ``Settings()`` in a local run
+    silently absorbs real credentials/webhooks from the repo root .env and
+    tests behave differently than in CI.
+    """
+    from config.settings import Settings
+
+    monkeypatch.setitem(Settings.model_config, "env_file", None)

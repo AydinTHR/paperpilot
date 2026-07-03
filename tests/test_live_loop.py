@@ -34,6 +34,8 @@ class _FakeBroker:
         self._positions = list(positions or [])
         self.orders: list[OrderInfo] = []
         self.closed: list[str] = []
+        self.stops: list[tuple[str, float]] = []
+        self.open_orders: list[OrderInfo] = []
 
     def get_account(self) -> AccountSnapshot:
         return AccountSnapshot(
@@ -51,22 +53,44 @@ class _FakeBroker:
         return list(self._positions)
 
     def place_market_order(self, symbol: str, qty: float, side: str) -> OrderInfo:
+        # Fills immediately (like Alpaca paper), so reconciliation is one poll.
         order = OrderInfo(
             id=f"ord-{len(self.orders) + 1}",
             symbol=symbol.upper(),
             qty=qty,
             side=side,
             order_type="market",
-            status="accepted",
-            filled_qty=0.0,
-            filled_avg_price=None,
+            status="filled",
+            filled_qty=qty,
+            filled_avg_price=100.0,
         )
         self.orders.append(order)
         return order
 
+    def place_market_order_with_stop(
+        self,
+        symbol: str,
+        qty: float,
+        side: str,
+        stop_price: float,
+        *,
+        ref_price: float | None = None,
+    ) -> OrderInfo:
+        self.stops.append((symbol.upper(), stop_price))
+        return self.place_market_order(symbol, qty, side)
+
     def close_position(self, symbol: str) -> None:
         self.closed.append(symbol.upper())
         self._positions = [p for p in self._positions if p.symbol != symbol.upper()]
+
+    def get_order(self, order_id: str) -> OrderInfo:
+        for order in self.orders:
+            if order.id == order_id:
+                return order
+        raise KeyError(order_id)
+
+    def get_open_orders(self, symbol: str | None = None) -> list[OrderInfo]:
+        return list(self.open_orders)
 
 
 class _FakeProvider:
@@ -434,3 +458,141 @@ def test_scheduled_tick_contains_exceptions() -> None:
     )
     # A tick failure is logged and swallowed so the scheduler keeps running.
     assert loop.scheduled_tick() is None
+
+
+# --- broker-held stops + reconciliation ---------------------------------------
+
+
+def _stops_settings(**kw):
+    return Settings(
+        _env_file=None,
+        alpaca_api_key="k",
+        alpaca_secret_key="s",
+        **kw,
+    )
+
+
+def _loop_with_settings(broker, provider, strategy, settings, *, symbols):
+    risk = RiskManager.from_settings(settings, starting_equity=100_000.0)
+    return TradingLoop(
+        broker=broker,
+        provider=provider,
+        strategy=strategy,
+        risk=risk,
+        journal=Journal("sqlite:///:memory:"),
+        settings=settings,
+        symbols=symbols,
+    )
+
+
+def test_entry_routes_via_broker_stop_when_enabled() -> None:
+    broker = _FakeBroker(equity=100_000.0, cash=100_000.0)
+    loop = _loop_with_settings(
+        broker,
+        _FakeProvider(_bars(last_close=100.0)),
+        _StubStrategy(Signal(Action.BUY, confidence=1.0)),
+        _stops_settings(),  # creds present -> use_broker_stops resolves true
+        symbols=["AAPL"],
+    )
+    result = loop.run_once(now=NOW)
+
+    assert result.outcomes[0].action == "BUY"
+    assert broker.stops == [("AAPL", 95.0)]  # stop_loss_pct 0.05 below entry 100
+
+
+def test_entry_plain_market_order_when_stops_disabled() -> None:
+    broker = _FakeBroker(equity=100_000.0, cash=100_000.0)
+    loop = _loop_with_settings(
+        broker,
+        _FakeProvider(_bars(last_close=100.0)),
+        _StubStrategy(Signal(Action.BUY, confidence=1.0)),
+        _stops_settings(use_broker_stops=False),
+        symbols=["AAPL"],
+    )
+    loop.run_once(now=NOW)
+    assert broker.stops == []
+    assert len(broker.orders) == 1
+
+
+def test_journal_records_reconciled_fill() -> None:
+    broker = _FakeBroker(equity=100_000.0, cash=100_000.0)
+    loop = _loop(
+        broker,
+        _FakeProvider(_bars(last_close=100.0)),
+        _StubStrategy(Signal(Action.BUY, confidence=1.0)),
+        symbols=["AAPL"],
+    )
+    loop.run_once(now=NOW)
+    order = loop.journal.recent_orders()[0]
+    assert order.status == "filled"
+    assert order.filled_qty == 100
+    assert order.filled_avg_price == 100.0
+
+
+def test_rejected_entry_degrades_to_skip() -> None:
+    class _RejectingBroker(_FakeBroker):
+        def place_market_order(self, symbol: str, qty: float, side: str) -> OrderInfo:
+            raise BrokerError("rejected as potential wash trade")
+
+    broker = _RejectingBroker(equity=100_000.0, cash=100_000.0)
+    loop = _loop(
+        broker,
+        _FakeProvider(_bars(last_close=100.0)),
+        _StubStrategy(Signal(Action.BUY, confidence=1.0)),
+        symbols=["AAPL"],
+    )
+    result = loop.run_once(now=NOW)  # must not raise
+    assert result.outcomes[0].action == "SKIP"
+    assert "rejected" in result.outcomes[0].detail
+
+
+def test_loop_stop_skipped_when_broker_stop_live() -> None:
+    # Holding from 100, price 90 -> loop stop WOULD fire, but a live broker
+    # stop order protects the position, so the loop leaves it alone.
+    broker = _FakeBroker(
+        equity=95_000.0,
+        cash=0.0,
+        positions=[_position("AAPL", qty=50, entry=100.0, price=90.0)],
+    )
+    broker.open_orders = [
+        OrderInfo(
+            id="stop-1",
+            symbol="AAPL",
+            qty=50,
+            side="sell",
+            order_type="stop",
+            status="new",
+            filled_qty=0.0,
+            filled_avg_price=None,
+        )
+    ]
+    loop = _loop_with_settings(
+        broker,
+        _FakeProvider(_bars(last_close=90.0)),
+        _StubStrategy(Signal(Action.HOLD)),
+        _stops_settings(),
+        symbols=["AAPL"],
+    )
+    result = loop.run_once(now=NOW)
+    assert broker.closed == []  # not closed by the loop
+    assert result.outcomes[0].action == "HOLD"
+
+
+def test_loop_stop_backstops_when_no_live_stop_order() -> None:
+    # Same losing position, but no live stop order (e.g. DAY stop expired at
+    # the close) -> the loop-side backstop must fire.
+    broker = _FakeBroker(
+        equity=95_000.0,
+        cash=0.0,
+        positions=[_position("AAPL", qty=50, entry=100.0, price=90.0)],
+    )
+    loop = _loop_with_settings(
+        broker,
+        _FakeProvider(_bars(last_close=90.0)),
+        _StubStrategy(Signal(Action.HOLD)),
+        _stops_settings(),
+        symbols=["AAPL"],
+    )
+    result = loop.run_once(now=NOW)
+    assert broker.closed == ["AAPL"]
+    assert result.outcomes[0].action == "STOP"

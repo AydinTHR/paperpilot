@@ -120,6 +120,18 @@ class Settings(BaseSettings):
         description="Skip scheduled loop ticks while the NYSE market is closed.",
     )
 
+    # --- Execution ---
+    use_broker_stops: bool | None = Field(
+        default=None,
+        description="Attach broker-held protective stops (OTO) to entries. "
+        "Unset resolves to true when Alpaca credentials are present.",
+    )
+    use_trade_stream: bool = Field(
+        default=False,
+        description="Run the optional websocket fill listener beside the "
+        "scheduled loop to reconcile fills that land between ticks.",
+    )
+
     # --- Live loop & trade journal ---
     default_strategy: str = Field(
         default="sma",
@@ -249,6 +261,13 @@ class Settings(BaseSettings):
             return self.data_provider
         return "alpaca" if self.has_credentials else "yfinance"
 
+    @property
+    def resolved_use_broker_stops(self) -> bool:
+        """Effective broker-stop choice: unset resolves by credential presence."""
+        if self.use_broker_stops is not None:
+            return self.use_broker_stops
+        return self.has_credentials
+
     def safe_summary(self) -> dict[str, object]:
         """A secret-free view of the config, suitable for logging."""
         return {
@@ -265,6 +284,8 @@ class Settings(BaseSettings):
             "data_provider": self.resolved_data_provider,
             "alpaca_data_feed": self.alpaca_data_feed,
             "market_hours_only": self.market_hours_only,
+            "use_broker_stops": self.resolved_use_broker_stops,
+            "use_trade_stream": self.use_trade_stream,
             "default_strategy": self.default_strategy,
             "loop_interval_minutes": self.loop_interval_minutes,
             "llm_provider": self.llm_provider,

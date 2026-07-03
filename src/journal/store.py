@@ -32,6 +32,26 @@ def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
+def _ensure_column(engine: Engine, table: str, column: str, ddl_type: str) -> None:
+    """Idempotent sqlite mini-migration: add ``column`` if the table lacks it.
+
+    The project has no Alembic; this covers the narrow case of adding nullable
+    or defaulted columns to a journal file created by an older version. No-op
+    for fresh databases (create_all already made the full schema) and for
+    non-sqlite engines.
+    """
+    from sqlalchemy import text
+
+    if engine.dialect.name != "sqlite":
+        return
+    with engine.connect() as conn:
+        existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})")).fetchall()}
+        if column not in existing:
+            conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {column} {ddl_type}"))
+            conn.commit()
+            logger.info("Migrated journal: added %s.%s (%s).", table, column, ddl_type)
+
+
 def _build_engine(db_url: str) -> Engine:
     """Create an engine, making the parent dir for file-based sqlite URLs.
 
@@ -59,6 +79,9 @@ class Journal:
         self.db_url = db_url
         self._engine = engine or _build_engine(db_url)
         Base.metadata.create_all(self._engine)
+        # create_all never ALTERs existing tables, so columns added after a
+        # user's journal file was created must be migrated explicitly.
+        _ensure_column(self._engine, "orders", "filled_qty", "FLOAT DEFAULT 0.0")
         self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
         logger.info("Trade journal ready at %s", db_url)
 
@@ -92,6 +115,7 @@ class Journal:
         qty: float,
         status: str = "",
         broker_order_id: str = "",
+        filled_qty: float = 0.0,
         filled_avg_price: float | None = None,
         reason: str = "",
         ts: datetime | None = None,
@@ -103,10 +127,42 @@ class Journal:
             qty=qty,
             status=status,
             broker_order_id=broker_order_id,
+            filled_qty=filled_qty,
             filled_avg_price=filled_avg_price,
             reason=reason,
         )
         return self._add(row)
+
+    def update_order_fill(
+        self,
+        broker_order_id: str,
+        *,
+        status: str,
+        filled_qty: float,
+        filled_avg_price: float | None,
+    ) -> bool:
+        """Reconcile an order row's fill fields in place; True if a row matched.
+
+        The journal is append-only by doctrine; this is the ONE deliberate
+        exception, used by asynchronous fill sources (the optional trade
+        stream) that learn the real fill after the row was written. Only the
+        fill fields ever change; the order row itself is never re-created.
+        """
+        with self._session_factory() as session:
+            row = session.scalars(
+                select(OrderRecord)
+                .where(OrderRecord.broker_order_id == broker_order_id)
+                .order_by(OrderRecord.id.desc())
+                .limit(1)
+            ).first()
+            if row is None:
+                logger.warning("No journal order with broker id %s to update.", broker_order_id)
+                return False
+            row.status = status
+            row.filled_qty = filled_qty
+            row.filled_avg_price = filled_avg_price
+            session.commit()
+        return True
 
     def record_equity(
         self,

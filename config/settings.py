@@ -132,6 +132,20 @@ class Settings(BaseSettings):
         "scheduled loop to reconcile fills that land between ticks.",
     )
 
+    # --- Alerting (all optional; alerting is disabled until configured) ---
+    telegram_bot_token: SecretStr = Field(
+        default=SecretStr(""),
+        description="Telegram bot token for halt/stop/failure alerts.",
+    )
+    telegram_chat_id: SecretStr = Field(
+        default=SecretStr(""),
+        description="Telegram chat id the alerts are sent to.",
+    )
+    discord_webhook_url: SecretStr = Field(
+        default=SecretStr(""),
+        description="Discord webhook URL for halt/stop/failure alerts.",
+    )
+
     # --- Live loop & trade journal ---
     default_strategy: str = Field(
         default="sma",
@@ -286,6 +300,9 @@ class Settings(BaseSettings):
             "market_hours_only": self.market_hours_only,
             "use_broker_stops": self.resolved_use_broker_stops,
             "use_trade_stream": self.use_trade_stream,
+            "has_telegram": bool(self.telegram_bot_token.get_secret_value())
+            and bool(self.telegram_chat_id.get_secret_value()),
+            "has_discord": bool(self.discord_webhook_url.get_secret_value()),
             "default_strategy": self.default_strategy,
             "loop_interval_minutes": self.loop_interval_minutes,
             "llm_provider": self.llm_provider,

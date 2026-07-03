@@ -40,6 +40,10 @@ making money.
   and the journal records the actual fill price and quantity.
 - **Scheduled live paper loop.** A blocking scheduler runs the strategy on an interval and
   records every decision and fill to a SQLite trade journal.
+- **Alerts and a dashboard.** Optional Telegram/Discord alerts on halts, stop-losses, and
+  tick failures, and a read-only Streamlit dashboard over the journal (equity curve,
+  drawdown, halt state, recent orders/signals): `streamlit run src/monitoring/dashboard.py`
+  after `pip install -r requirements-dashboard.txt`.
 - **Optional LLM signal layer.** A provider-agnostic adapter (Claude wired) that can supply
   a signal, risk-gated and disabled unless an API key is set.
 

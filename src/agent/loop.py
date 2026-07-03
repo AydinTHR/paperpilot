@@ -27,6 +27,7 @@ from src.data.market_data import build_provider
 from src.execution.broker import AccountSnapshot, Broker, BrokerError, OrderInfo, PositionInfo
 from src.execution.reconcile import OrderReconciler
 from src.journal.store import Journal
+from src.monitoring.alerts import Alerter, NullAlerter, build_alerter
 from src.risk.manager import RiskManager
 from src.strategy.base import Action, Strategy
 
@@ -107,6 +108,7 @@ class TradingLoop:
         lookback: int | None = None,
         market_calendar: MarketCalendarLike | None = None,
         reconciler: OrderReconciler | None = None,
+        alerter: Alerter | None = None,
     ) -> None:
         self.broker = broker
         self.provider = provider
@@ -122,6 +124,8 @@ class TradingLoop:
         # run_once is never gated, so --once and tests always execute.
         self.market_calendar = market_calendar
         self._reconciler = reconciler or OrderReconciler(broker)
+        # send() never raises by contract, so alert points need no guarding.
+        self.alerter: Alerter = alerter or NullAlerter()
 
     @classmethod
     def from_settings(
@@ -194,6 +198,7 @@ class TradingLoop:
             symbols=symbols or get_universe(),
             lookback=lookback,
             market_calendar=MarketCalendar() if gate else None,
+            alerter=build_alerter(settings),
         )
 
     # --- one iteration -------------------------------------------------------
@@ -204,9 +209,12 @@ class TradingLoop:
         account = self.broker.get_account()
         equity, cash = account.equity, account.cash
 
+        was_halted = self.risk.halted
         self.risk.update_equity(equity, now=now)
         halted = self.risk.halted
         halt_reason = self.risk.halt_reason
+        if halted and not was_halted:
+            self.alerter.send(f"PaperPilot HALT: {halt_reason} (equity {equity:,.2f})")
         self.journal.record_equity(
             equity=equity, cash=cash, halted=halted, halt_reason=halt_reason, ts=now
         )
@@ -287,6 +295,10 @@ class TradingLoop:
                 ts=now,
             )
             logger.warning("Stop-loss hit on %s at %.2f; closed position.", symbol, price)
+            self.alerter.send(
+                f"PaperPilot STOP: {symbol} stop-loss @ {price:.2f}, "
+                f"closed {position.qty:g} share(s)."
+            )
             return SymbolOutcome(
                 symbol, "STOP", f"stop-loss @ {price:.2f}", qty=position.qty, price=price
             )
@@ -417,8 +429,9 @@ class TradingLoop:
             return None
         try:
             result = self.run_once(now=now)
-        except Exception:
+        except Exception as exc:
             logger.exception("Loop tick failed; will retry next interval.")
+            self.alerter.send(f"PaperPilot ERROR: loop tick failed ({exc}); retrying next tick.")
             return None
         logger.info("Scheduled tick complete: equity=%.2f halted=%s", result.equity, result.halted)
         return result

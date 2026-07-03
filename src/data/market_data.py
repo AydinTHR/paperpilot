@@ -20,18 +20,12 @@ import pandas as pd
 
 from config.logging_config import get_logger
 from config.settings import Settings, get_settings
+from src.data.cache import ParquetBarCache
 
 logger = get_logger(__name__)
 
 OHLCV_COLUMNS: tuple[str, ...] = ("Open", "High", "Low", "Close", "Volume")
 SUPPORTED_INTERVALS: tuple[str, ...] = ("1d", "1h")
-
-# How long a cached file stays "fresh" before we refetch. Daily bars settle
-# once per session; hourly change far more often.
-_CACHE_TTL: dict[str, timedelta] = {
-    "1d": timedelta(hours=12),
-    "1h": timedelta(minutes=30),
-}
 
 
 class MarketDataProvider(Protocol):
@@ -96,6 +90,7 @@ class YFinanceProvider:
     ) -> None:
         self.settings = settings or get_settings()
         self.cache_dir = Path(self.settings.data_cache_dir)
+        self._cache = ParquetBarCache(self.cache_dir)
         self._downloader = downloader
 
     # --- public API ---
@@ -162,30 +157,13 @@ class YFinanceProvider:
         return yf.download(**kwargs)
 
     def _cache_path(self, symbol: str, interval: str) -> Path:
-        return self.cache_dir / f"{symbol}_{interval}.parquet"
+        return self._cache.path(symbol, interval)
 
     def _load_cache_if_fresh(self, path: Path, interval: str) -> pd.DataFrame | None:
-        if not path.exists():
-            return None
-        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC)
-        age = datetime.now(UTC) - mtime
-        ttl = _CACHE_TTL.get(interval, timedelta(hours=12))
-        if age > ttl:
-            logger.info("Cache %s stale (age %s > ttl %s); refetching.", path, age, ttl)
-            return None
-        try:
-            return _normalize(pd.read_parquet(path))
-        except Exception as exc:
-            logger.warning("Could not read cache %s (%s); refetching.", path, exc)
-            return None
+        return self._cache.load_if_fresh(path, interval, transform=_normalize)
 
     def _write_cache(self, path: Path, df: pd.DataFrame) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        try:
-            df.to_parquet(path)
-            logger.info("Wrote %d rows to cache %s.", len(df), path)
-        except Exception as exc:
-            logger.warning("Could not write cache %s (%s).", path, exc)
+        self._cache.write(path, df)
 
     @staticmethod
     def _lookback_window(lookback: int, interval: str) -> tuple[str, str]:

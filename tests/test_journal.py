@@ -150,3 +150,9 @@ def test_halt_state_round_trip_latest_wins() -> None:
 
 def test_latest_halt_states_empty_without_rows() -> None:
     assert Journal("sqlite:///:memory:").latest_halt_states() == {}
+
+
+def test_order_strategy_attribution_and_migration(tmp_path) -> None:
+    journal = Journal("sqlite:///:memory:")
+    journal.record_order(symbol="AAPL", side="buy", qty=5, strategy="SMA cross")
+    assert journal.recent_orders()[0].strategy == "SMA cross"

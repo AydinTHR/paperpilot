@@ -82,6 +82,7 @@ class Journal:
         # create_all never ALTERs existing tables, so columns added after a
         # user's journal file was created must be migrated explicitly.
         _ensure_column(self._engine, "orders", "filled_qty", "FLOAT DEFAULT 0.0")
+        _ensure_column(self._engine, "orders", "strategy", "VARCHAR(64) DEFAULT ''")
         self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
         logger.info("Trade journal ready at %s", db_url)
 
@@ -113,6 +114,7 @@ class Journal:
         symbol: str,
         side: str,
         qty: float,
+        strategy: str = "",
         status: str = "",
         broker_order_id: str = "",
         filled_qty: float = 0.0,
@@ -123,6 +125,7 @@ class Journal:
         row = OrderRecord(
             ts=ts or _utcnow(),
             symbol=symbol.upper(),
+            strategy=strategy,
             side=side,
             qty=qty,
             status=status,

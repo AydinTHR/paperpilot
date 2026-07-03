@@ -47,6 +47,7 @@ class OrderRecord(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
     symbol: Mapped[str] = mapped_column(String(16), index=True)
+    strategy: Mapped[str] = mapped_column(String(64), default="")
     side: Mapped[str] = mapped_column(String(8))
     qty: Mapped[float] = mapped_column(Float)
     status: Mapped[str] = mapped_column(String(32), default="")

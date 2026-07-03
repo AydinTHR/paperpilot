@@ -70,6 +70,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--symbols", default=None, help="Comma-separated tickers (overrides universe)."
     )
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Archive existing arm journals first, so the comparison starts "
+        "from a clean baseline (mixing runs in one journal skews RETURN%%).",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -83,6 +89,12 @@ def main(argv: list[str] | None = None) -> int:
     symbols = (
         [s.strip().upper() for s in args.symbols.split(",") if s.strip()] if args.symbols else None
     )
+
+    if args.fresh:
+        from src.experiments.harness import archive_arm_journals
+
+        for path in archive_arm_journals(settings, strategies):
+            print(f"  archived {path}")
 
     try:
         harness = ExperimentHarness.from_settings(

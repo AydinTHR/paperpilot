@@ -106,6 +106,19 @@ class Settings(BaseSettings):
         default="data/cache",
         description="Directory for the local parquet OHLCV cache.",
     )
+    data_provider: str = Field(
+        default="auto",
+        description="Market data source: 'alpaca', 'yfinance', or 'auto' "
+        "(alpaca when Alpaca credentials are present, else yfinance).",
+    )
+    alpaca_data_feed: str = Field(
+        default="iex",
+        description="Alpaca market data feed: 'iex' (free Basic plan) or 'sip' (paid).",
+    )
+    market_hours_only: bool = Field(
+        default=True,
+        description="Skip scheduled loop ticks while the NYSE market is closed.",
+    )
 
     # --- Live loop & trade journal ---
     default_strategy: str = Field(
@@ -166,6 +179,24 @@ class Settings(BaseSettings):
             raise ValueError(f"DEFAULT_INTERVAL must be one of {sorted(allowed)}, got {v!r}")
         return interval
 
+    @field_validator("data_provider")
+    @classmethod
+    def _normalize_data_provider(cls, v: str) -> str:
+        provider = v.strip().lower()
+        allowed = {"auto", "alpaca", "yfinance"}
+        if provider not in allowed:
+            raise ValueError(f"DATA_PROVIDER must be one of {sorted(allowed)}, got {v!r}")
+        return provider
+
+    @field_validator("alpaca_data_feed")
+    @classmethod
+    def _normalize_data_feed(cls, v: str) -> str:
+        feed = v.strip().lower()
+        allowed = {"iex", "sip"}
+        if feed not in allowed:
+            raise ValueError(f"ALPACA_DATA_FEED must be one of {sorted(allowed)}, got {v!r}")
+        return feed
+
     @field_validator("default_strategy")
     @classmethod
     def _normalize_strategy(cls, v: str) -> str:
@@ -211,6 +242,13 @@ class Settings(BaseSettings):
         """True when an API key for the configured LLM provider is present."""
         return bool(self.anthropic_api_key.get_secret_value())
 
+    @property
+    def resolved_data_provider(self) -> str:
+        """The effective data source: 'auto' resolves by credential presence."""
+        if self.data_provider != "auto":
+            return self.data_provider
+        return "alpaca" if self.has_credentials else "yfinance"
+
     def safe_summary(self) -> dict[str, object]:
         """A secret-free view of the config, suitable for logging."""
         return {
@@ -224,6 +262,9 @@ class Settings(BaseSettings):
             "stop_loss_pct": self.stop_loss_pct,
             "log_level": self.log_level,
             "default_interval": self.default_interval,
+            "data_provider": self.resolved_data_provider,
+            "alpaca_data_feed": self.alpaca_data_feed,
+            "market_hours_only": self.market_hours_only,
             "default_strategy": self.default_strategy,
             "loop_interval_minutes": self.loop_interval_minutes,
             "llm_provider": self.llm_provider,

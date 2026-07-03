@@ -37,7 +37,9 @@ source = ["src", "config"]
 fail_under = 88
 
 [tool.mypy]
-python_version = "3.11"
+# No pinned python_version: each CI matrix job checks under its own
+# interpreter, so site-packages stubs (e.g. numpy's PEP 695 `type` aliases,
+# 3.12+) are parsed with the rules of the version that installed them.
 files = ["src", "config"]
 check_untyped_defs = true
 disallow_incomplete_defs = true

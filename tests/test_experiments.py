@@ -245,3 +245,21 @@ def test_archive_arm_journals_noop_when_clean(tmp_path) -> None:
         db_url=f"sqlite:///{tmp_path}/paperpilot.db",
     )
     assert archive_arm_journals(settings, ["sma", "rsi", "llm"]) == []
+
+
+def test_arms_share_market_hours_gate(monkeypatch) -> None:
+    _patched(monkeypatch)
+    harness = ExperimentHarness.from_settings(
+        Settings(), strategies=("sma", "rsi"), symbols=["AAPL"]
+    )
+    calendars = [arm.loop.market_calendar for arm in harness.arms]
+    assert all(c is not None for c in calendars)
+    assert calendars[0] is calendars[1]  # one shared calendar, not one per arm
+
+
+def test_market_hours_gate_disabled_via_settings(monkeypatch) -> None:
+    _patched(monkeypatch)
+    harness = ExperimentHarness.from_settings(
+        Settings(market_hours_only=False), strategies=("sma",), symbols=["AAPL"]
+    )
+    assert harness.arms[0].loop.market_calendar is None

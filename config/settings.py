@@ -192,6 +192,11 @@ class Settings(BaseSettings):
         description="Anthropic API key for the LLM layer (env ANTHROPIC_API_KEY). "
         "Blank disables the LLM strategy (it then HOLDs).",
     )
+    openrouter_api_key: SecretStr = Field(
+        default=SecretStr(""),
+        description="OpenRouter API key, used when LLM_PROVIDER=openrouter. "
+        "Blank disables the LLM strategy (it then HOLDs).",
+    )
 
     @field_validator("log_level")
     @classmethod
@@ -242,7 +247,7 @@ class Settings(BaseSettings):
     @classmethod
     def _normalize_llm_provider(cls, v: str) -> str:
         provider = v.strip().lower()
-        allowed = {"anthropic", "openai"}
+        allowed = {"anthropic", "openrouter", "openai"}
         if provider not in allowed:
             raise ValueError(f"LLM_PROVIDER must be one of {sorted(allowed)}, got {v!r}")
         return provider
@@ -272,6 +277,8 @@ class Settings(BaseSettings):
     @property
     def has_llm_key(self) -> bool:
         """True when an API key for the configured LLM provider is present."""
+        if self.llm_provider == "openrouter":
+            return bool(self.openrouter_api_key.get_secret_value())
         return bool(self.anthropic_api_key.get_secret_value())
 
     def account_credentials(self, n: int) -> tuple[str, str] | None:

@@ -242,10 +242,14 @@ class ExperimentHarness:
         if mode not in ("accounts", "virtual"):
             raise ValueError(f"mode must be 'auto', 'accounts', or 'virtual', got {mode!r}")
 
+        from src.agent.market_hours import MarketCalendar
         from src.data.universe import get_universe
 
         provider = build_provider(settings)  # ONE provider: shared cache across arms
         symbols = symbols or get_universe()
+        # One shared calendar gates every arm's scheduled ticks (same rule as
+        # the single live loop); None disables the gate.
+        calendar = MarketCalendar() if settings.market_hours_only else None
         arms: list[ExperimentArm] = []
 
         shared_broker: Broker | None = None
@@ -288,6 +292,7 @@ class ExperimentHarness:
                         journal=journal,
                         settings=settings,
                         symbols=symbols,
+                        market_calendar=calendar,
                     ),
                     journal=journal,
                 )

@@ -235,6 +235,29 @@ class Journal:
     def recent_equity(self, limit: int = 20) -> list[EquitySnapshot]:
         return self._recent(EquitySnapshot, limit)
 
+    def unreconciled_orders(
+        self,
+        *,
+        terminal_statuses: frozenset[str],
+        limit: int = 20,
+    ) -> list[OrderRecord]:
+        """Orders with a broker id whose journaled status is not yet terminal.
+
+        These are rows whose real fill may have landed while the agent was down
+        (or after the submit-time reconcile window closed); the loop sweeps them
+        each tick. ``terminal_statuses`` is passed in (the reconciler owns the
+        set) so the journal stays free of execution-layer imports.
+        """
+        with self._session_factory() as session:
+            rows = session.scalars(
+                select(OrderRecord)
+                .where(OrderRecord.broker_order_id != "")
+                .order_by(OrderRecord.id.desc())
+                .limit(limit * 5)  # cheap over-fetch; status filtering is in Python
+            )
+            open_rows = [r for r in rows if r.status.lower() not in terminal_statuses]
+            return list(reversed(open_rows[:limit]))  # oldest-first
+
     def latest_halt_states(self) -> dict[str, HaltStateRecord]:
         """The most recent transition per halt type (the authoritative state)."""
         with self._session_factory() as session:

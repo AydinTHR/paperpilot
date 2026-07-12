@@ -2,5 +2,5 @@
 # Install with: pip install -r requirements-dashboard.txt
 -r requirements.txt
 
-streamlit>=1.40,<2
+streamlit>=1.59.0,<2
 plotly>=5.20

@@ -25,7 +25,7 @@ from config.logging_config import get_logger
 from config.settings import Settings, get_settings
 from src.data.market_data import build_provider
 from src.execution.broker import AccountSnapshot, Broker, BrokerError, OrderInfo, PositionInfo
-from src.execution.reconcile import OrderReconciler
+from src.execution.reconcile import TERMINAL_STATUSES, OrderReconciler
 from src.journal.store import Journal
 from src.monitoring.alerts import Alerter, NullAlerter, build_alerter
 from src.risk.manager import RiskManager
@@ -52,7 +52,7 @@ class BrokerLike(Protocol):
         *,
         ref_price: float | None = None,
     ) -> OrderInfo: ...
-    def close_position(self, symbol: str) -> None: ...
+    def close_position(self, symbol: str) -> OrderInfo | None: ...
     def get_order(self, order_id: str) -> OrderInfo: ...
     def get_open_orders(self, symbol: str | None = None) -> list[OrderInfo]: ...
 
@@ -219,6 +219,7 @@ class TradingLoop:
             equity=equity, cash=cash, halted=halted, halt_reason=halt_reason, ts=now
         )
 
+        self._reconcile_open_orders()
         positions = {p.symbol.upper(): p for p in self.broker.get_positions()}
 
         outcomes: list[SymbolOutcome] = []
@@ -285,16 +286,7 @@ class TradingLoop:
             and not self._has_live_stop(symbol)
             and self.risk.stop_breached(position.avg_entry_price, price)
         ):
-            self.broker.close_position(symbol)
-            self.journal.record_order(
-                symbol=symbol,
-                strategy=self.strategy.name,
-                side="sell",
-                qty=position.qty,
-                status="submitted",
-                reason="stop-loss",
-                ts=now,
-            )
+            self._close_and_journal(symbol, position.qty, "stop-loss", now)
             logger.warning("Stop-loss hit on %s at %.2f; closed position.", symbol, price)
             self.alerter.send(
                 f"PaperPilot STOP: {symbol} stop-loss @ {price:.2f}, "
@@ -320,16 +312,7 @@ class TradingLoop:
             )
 
         if signal.action is Action.SELL and holding and position is not None:
-            self.broker.close_position(symbol)
-            self.journal.record_order(
-                symbol=symbol,
-                strategy=self.strategy.name,
-                side="sell",
-                qty=position.qty,
-                status="submitted",
-                reason="signal SELL",
-                ts=now,
-            )
+            self._close_and_journal(symbol, position.qty, "signal SELL", now)
             return SymbolOutcome(symbol, "SELL", signal.reason, qty=position.qty, price=price)
 
         return SymbolOutcome(symbol, "HOLD", signal.reason or signal.action.value, price=price)
@@ -381,6 +364,72 @@ class TradingLoop:
         )
         return SymbolOutcome(symbol, "BUY", reason, qty=qty, price=price, order_id=order.id)
 
+    def _reconcile_open_orders(self) -> None:
+        """Back-fill journaled orders whose fills landed while we weren't looking.
+
+        Repairs rows left non-terminal by agent downtime or a closed reconcile
+        window (week-1's AAPL entry filled at Monday's open, days after the
+        submit-time poll gave up). Best-effort: never raises into the tick.
+        """
+        try:
+            rows = self.journal.unreconciled_orders(terminal_statuses=TERMINAL_STATUSES)
+        except Exception as exc:
+            logger.warning("Unreconciled-order scan failed: %s", exc)
+            return
+        for row in rows:
+            try:
+                order = self.broker.get_order(row.broker_order_id)
+            except Exception as exc:
+                logger.warning("Could not re-reconcile order %s: %s", row.broker_order_id, exc)
+                continue
+            if order.status.lower() in TERMINAL_STATUSES or order.filled_qty != row.filled_qty:
+                self.journal.update_order_fill(
+                    row.broker_order_id,
+                    status=order.status,
+                    filled_qty=order.filled_qty,
+                    filled_avg_price=order.filled_avg_price,
+                )
+                logger.info(
+                    "Re-reconciled order %s -> %s (filled %g).",
+                    row.broker_order_id,
+                    order.status,
+                    order.filled_qty,
+                )
+
+    def _close_and_journal(self, symbol: str, qty: float, reason: str, now: datetime) -> None:
+        """Close a position and journal the exit with its real, reconciled fill.
+
+        Exits used to be journaled without a broker order id, which made them
+        invisible to reconciliation and to FIFO trade pairing. The close order
+        Alpaca returns carries the id; fills that outrun the short poll here
+        are picked up later by the per-tick sweep.
+        """
+        order = self.broker.close_position(symbol)
+        if order is not None and order.id:
+            recon = self._reconciler.wait_for_terminal(order.id)
+            self.journal.record_order(
+                symbol=symbol,
+                strategy=self.strategy.name,
+                side="sell",
+                qty=qty,
+                status=recon.status,
+                broker_order_id=order.id,
+                filled_qty=recon.filled_qty,
+                filled_avg_price=recon.filled_avg_price,
+                reason=reason,
+                ts=now,
+            )
+        else:
+            self.journal.record_order(
+                symbol=symbol,
+                strategy=self.strategy.name,
+                side="sell",
+                qty=qty,
+                status="submitted",
+                reason=reason,
+                ts=now,
+            )
+
     def _has_live_stop(self, symbol: str) -> bool:
         """True when a broker-held stop order currently protects ``symbol``."""
         if not self.settings.resolved_use_broker_stops:
@@ -402,16 +451,7 @@ class TradingLoop:
         for symbol, pos in positions.items():
             if pos.qty <= 0:
                 continue
-            self.broker.close_position(symbol)
-            self.journal.record_order(
-                symbol=symbol,
-                strategy=self.strategy.name,
-                side="sell",
-                qty=pos.qty,
-                status="submitted",
-                reason=f"halt: {halt_reason}",
-                ts=now,
-            )
+            self._close_and_journal(symbol, pos.qty, f"halt: {halt_reason}", now)
             outcomes.append(SymbolOutcome(symbol, "FLATTEN", halt_reason, qty=pos.qty))
         return outcomes
 

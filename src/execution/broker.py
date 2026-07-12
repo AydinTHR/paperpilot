@@ -259,11 +259,12 @@ class Broker:
     ) -> OrderInfo:
         """Market entry with a broker-held protective stop (OTO order class).
 
-        The stop lives at Alpaca, so the position is protected between loop
-        ticks and across agent downtime. Constraints from Alpaca's order rules:
-        whole shares only, and the sell-stop must sit at least $0.01 below the
-        base price (``ref_price``, normally the last close), so the stop is
-        clamped and rounded to cents.
+        The stop lives at Alpaca as a GTC leg, so the position stays protected
+        between loop ticks, across agent downtime, AND overnight (a DAY leg
+        expires at the close, which left week-1's position bare for two days).
+        Constraints from Alpaca's order rules: whole shares only, and the
+        sell-stop must sit at least $0.01 below the base price (``ref_price``,
+        normally the last close), so the stop is clamped and rounded to cents.
         """
         # Defense in depth, same as __init__: never a live order by accident.
         if not self.settings.paper and not self.settings.allow_live_trading:
@@ -285,7 +286,7 @@ class Broker:
             symbol=symbol.upper(),
             qty=int(qty),
             side=self._coerce_side(side),
-            time_in_force=TimeInForce.DAY,
+            time_in_force=TimeInForce.GTC,
             order_class=OrderClass.OTO,
             stop_loss=StopLossRequest(stop_price=stop),
         )
@@ -300,12 +301,15 @@ class Broker:
             raise BrokerError(f"Failed to cancel open orders: {exc}") from exc
         logger.info("Cancelled all open orders.")
 
-    def close_position(self, symbol: str) -> None:
-        """Liquidate an entire position in ``symbol``.
+    def close_position(self, symbol: str) -> OrderInfo | None:
+        """Liquidate an entire position in ``symbol``; returns the closing order.
 
         Any open orders on the symbol (e.g. a broker-held OTO stop leg) are
         cancelled first: Alpaca rejects a close while they are live. The cancel
-        is best-effort so a stuck order cannot block an exit attempt.
+        is best-effort so a stuck order cannot block an exit attempt. Alpaca's
+        close endpoint returns the market order it created; callers journal its
+        id so the exit can be reconciled to its real fill later. None only when
+        the client returns nothing (some fakes and older SDKs).
         """
         symbol = symbol.upper()
         for order in self.get_open_orders(symbol):
@@ -315,10 +319,11 @@ class Broker:
             except Exception as exc:
                 logger.warning("Could not cancel order %s on %s: %s", order.id, symbol, exc)
         try:
-            self._client.close_position(symbol)
+            closing = self._client.close_position(symbol)
         except Exception as exc:
             raise BrokerError(f"Failed to close position {symbol}: {exc}") from exc
         logger.info("Closed position: %s", symbol)
+        return self._to_order_info(closing) if closing is not None else None
 
     # --- order status ---
 

@@ -21,10 +21,11 @@ per-bar response cache so re-runs cost zero API dollars.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -116,14 +117,15 @@ class VirtualPortfolio:
         self._book_fill(order, side)
         return order
 
-    def close_position(self, symbol: str) -> None:
+    def close_position(self, symbol: str) -> OrderInfo | None:
         """Sell only THIS arm's shares -- never the whole real position."""
         symbol = symbol.upper()
         held = self._book.get(symbol)
         if held is None or held.qty <= 0:
-            return
+            return None
         order = self._broker.place_market_order(symbol, held.qty, "sell")
         self._book_fill(order, "sell")
+        return order
 
     def get_order(self, order_id: str) -> OrderInfo:
         return self._broker.get_order(order_id)
@@ -201,6 +203,9 @@ class ExperimentArm:
     name: str
     loop: TradingLoop
     journal: Journal
+    # (api_key, secret_key) for this arm's account; None in virtual mode.
+    # Lets run_scheduled route a fill-stream listener to the right account.
+    credentials: tuple[str, str] | None = None
 
 
 @dataclass(frozen=True)
@@ -258,6 +263,7 @@ class ExperimentHarness:
 
         for i, key in enumerate(strategies, start=1):
             journal = Journal(_arm_db_url(settings.db_url, key))
+            creds: tuple[str, str] | None = None
             if mode == "accounts":
                 creds = settings.account_credentials(i)
                 if creds is None:
@@ -295,6 +301,7 @@ class ExperimentHarness:
                         market_calendar=calendar,
                     ),
                     journal=journal,
+                    credentials=creds,
                 )
             )
 
@@ -305,6 +312,41 @@ class ExperimentHarness:
         """One tick per arm, sequentially (shared provider cache keeps it cheap)."""
         return {arm.name: arm.loop.run_once() for arm in self.arms}
 
+    def start_trade_streams(
+        self, *, listener_factory: Callable[..., Any] | None = None
+    ) -> list[Any]:
+        """One fill-stream listener per arm when USE_TRADE_STREAM is enabled.
+
+        Each arm streams its own account's trade updates into its own journal,
+        catching fills that land between ticks (a stop leg firing mid-interval,
+        a queued order filling at the open). Accounts mode only: in virtual
+        mode all arms share one account, and the per-tick reconciliation sweep
+        covers it without three duplicate websockets.
+        """
+        if not self.settings.use_trade_stream:
+            return []
+        if self.mode != "accounts":
+            logger.info("Trade streams require accounts mode; relying on the per-tick sweep.")
+            return []
+        from src.execution.trade_stream import TradeStreamListener
+
+        factory = listener_factory or TradeStreamListener
+        listeners: list[Any] = []
+        for arm in self.arms:
+            if arm.credentials is None:
+                continue
+            listener = factory(
+                self.settings,
+                arm.journal,
+                api_key=arm.credentials[0],
+                secret_key=arm.credentials[1],
+                name=f"trade-stream-{arm.name}",
+            )
+            listener.start()
+            listeners.append(listener)
+        logger.info("Started %d trade-stream listener(s).", len(listeners))
+        return listeners
+
     def run_scheduled(self, interval_minutes: int | None = None) -> None:
         """All arms per tick on one blocking scheduler (Ctrl-C to stop)."""
         from datetime import UTC, datetime
@@ -312,6 +354,7 @@ class ExperimentHarness:
         from apscheduler.schedulers.blocking import BlockingScheduler
 
         interval = interval_minutes or self.settings.loop_interval_minutes
+        self.start_trade_streams()
 
         def _tick() -> None:
             for arm in self.arms:
@@ -378,6 +421,18 @@ def _build_strategy(key: str, settings: Settings, journal: Journal) -> Strategy:
     if key == "llm":
         return LlmStrategy(settings=settings, response_store=journal)
     raise ValueError(f"unknown strategy key {key!r}; expected sma, rsi, or llm.")
+
+
+def arm_report_from_journal(base_db_url: str, arm_name: str) -> ArmReport | None:
+    """Build one arm's report straight from its journal file, broker-free.
+
+    For read-only consumers (the weekly report cron) that must not open broker
+    connections or place anything. None when the arm has no journal yet.
+    """
+    url = _arm_db_url(base_db_url, arm_name)
+    if url.startswith("sqlite:///") and not Path(url.removeprefix("sqlite:///")).exists():
+        return None
+    return _arm_report(arm_name, Journal(url))
 
 
 def _arm_report(name: str, journal: Journal) -> ArmReport:

@@ -35,10 +35,19 @@ class TradeStreamListener:
         journal: Journal,
         *,
         stream: Any | None = None,
+        api_key: str | None = None,
+        secret_key: str | None = None,
+        name: str = "trade-stream",
     ) -> None:
         self.settings = settings
         self.journal = journal
+        self.name = name
         self._stream = stream
+        # Overrides route the stream to a non-primary account (experiment arms
+        # each stream their own account's fills). Paper/live still comes from
+        # settings only, same rule as Broker.
+        self._api_key = api_key
+        self._secret_key = secret_key
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
@@ -47,9 +56,9 @@ class TradeStreamListener:
             return
         stream = self._get_stream()
         stream.subscribe_trade_updates(self._on_update)
-        self._thread = threading.Thread(target=stream.run, name="trade-stream", daemon=True)
+        self._thread = threading.Thread(target=stream.run, name=self.name, daemon=True)
         self._thread.start()
-        logger.info("Trade stream listener started.")
+        logger.info("Trade stream listener started (%s).", self.name)
 
     async def _on_update(self, data: Any) -> None:
         """Journal fill state from one trade-update event; never raises."""
@@ -78,8 +87,8 @@ class TradeStreamListener:
             from alpaca.trading.stream import TradingStream
 
             self._stream = TradingStream(
-                api_key=self.settings.alpaca_api_key.get_secret_value(),
-                secret_key=self.settings.alpaca_secret_key.get_secret_value(),
+                api_key=self._api_key or self.settings.alpaca_api_key.get_secret_value(),
+                secret_key=(self._secret_key or self.settings.alpaca_secret_key.get_secret_value()),
                 paper=self.settings.paper,
             )
         return self._stream

@@ -1,0 +1,38 @@
+services:
+  experiment:
+    build: .
+    container_name: paperpilot-experiment
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
+
+  # Read-only journal dashboard. Bound to loopback ONLY: view it through an
+  # SSH tunnel (ssh -L 8501:localhost:8501 <server>), never a public port.
+  dashboard:
+    build: .
+    container_name: paperpilot-dashboard
+    restart: unless-stopped
+    env_file: .env
+    command:
+      [
+        "streamlit",
+        "run",
+        "src/monitoring/dashboard.py",
+        "--server.headless",
+        "true",
+        "--server.address",
+        "0.0.0.0",
+        "--server.port",
+        "8501",
+      ]
+    ports:
+      - "127.0.0.1:8501:8501"
+    volumes:
+      - ./data:/app/data

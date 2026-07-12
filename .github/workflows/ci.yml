@@ -25,17 +25,24 @@ jobs:
       - run: mypy
       - run: pytest --cov=src --cov=config --cov-report=term-missing
 
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build the deployment image
+        run: docker build -t paperpilot:ci .
+
   # Stable required check. Branch protection requires "CI", which stays valid
   # regardless of how many versions the matrix runs.
   CI:
     runs-on: ubuntu-latest
-    needs: [test]
+    needs: [test, docker]
     if: always()
     steps:
       - name: Aggregate matrix result
         run: |
-          if [ "${{ needs.test.result }}" != "success" ]; then
-            echo "test job did not succeed"
+          if [ "${{ needs.test.result }}" != "success" ] || [ "${{ needs.docker.result }}" != "success" ]; then
+            echo "a required job did not succeed"
             exit 1
           fi
           echo "all checks passed"

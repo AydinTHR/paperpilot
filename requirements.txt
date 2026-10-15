@@ -30,4 +30,4 @@ requests>=2.32,<3
 
 # --- Phase 6: optional LLM signal layer (provider-agnostic; Claude adapter) ---
 # Soft dependency: imported lazily, only when the LLM strategy is used with a key.
-anthropic>=0.113.0,<1
+anthropic>=0.116.0,<1

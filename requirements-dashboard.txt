@@ -3,4 +3,4 @@
 -r requirements.txt
 
 streamlit>=1.40,<2
-plotly>=5.20
+plotly>=6.8.0

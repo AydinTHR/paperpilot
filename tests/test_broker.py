@@ -84,7 +84,7 @@ class FakeClient:
     def close_position(self, symbol: str) -> None:
         self.closed.append(symbol)
 
-    def get_order_by_id(self, order_id: str) -> _FakeOrder:
+    def get_order_by_id(self, order_id: str, filter: object = None) -> _FakeOrder:
         for order in self.orders:
             if order.id == order_id:
                 return order
@@ -280,3 +280,78 @@ def test_get_open_orders_degrades_to_empty_on_error() -> None:
 
     broker = Broker(paper_settings(), client=_Exploding(), announce=False)
     assert broker.get_open_orders("AAPL") == []
+
+
+# --- stop legs and fill times ----------------------------------------------------
+
+
+def test_order_info_carries_legs_and_fill_time() -> None:
+    from datetime import UTC, datetime
+    from types import SimpleNamespace
+
+    fired = datetime(2026, 6, 2, 14, 30, tzinfo=UTC)
+    leg = SimpleNamespace(
+        id="leg-1",
+        symbol="AAPL",
+        qty="10",
+        side=OrderSide.SELL,
+        order_type="stop",
+        status="held",
+        filled_qty="0",
+        filled_avg_price=None,
+        filled_at=None,
+        legs=None,
+    )
+    parent = SimpleNamespace(
+        id="ord-1",
+        symbol="AAPL",
+        qty="10",
+        side=OrderSide.BUY,
+        order_type="market",
+        status="filled",
+        filled_qty="10",
+        filled_avg_price="100.5",
+        filled_at=fired,
+        legs=[leg],
+    )
+    info = Broker._to_order_info(parent)
+    assert info.filled_at == fired
+    assert [(x.id, x.side, x.order_type, x.status) for x in info.legs] == [
+        ("leg-1", "sell", "stop", "held")
+    ]
+
+
+def test_order_info_without_legs_or_fill_time() -> None:
+    client = FakeClient()
+    placed = make_broker(client).place_market_order("AAPL", 5, "buy")
+    assert placed.legs == ()
+    assert placed.filled_at is None
+
+
+def test_get_order_asks_for_nested_legs() -> None:
+    seen: list[object] = []
+
+    class _Recording(FakeClient):
+        def get_order_by_id(self, order_id: str, filter: object = None) -> _FakeOrder:
+            seen.append(filter)
+            return super().get_order_by_id(order_id, filter)
+
+    client = _Recording()
+    broker = make_broker(client)
+    placed = broker.place_market_order("AAPL", 5, "buy")
+    broker.get_order(placed.id)
+    assert getattr(seen[0], "nested", None) is True
+
+
+def test_cancel_order_delegates_and_wraps_errors() -> None:
+    client = FakeClient()
+    broker = make_broker(client)
+    broker.cancel_order("leg-1")
+    assert client.cancelled_ids == ["leg-1"]
+
+    class _Refusing(FakeClient):
+        def cancel_order_by_id(self, order_id: str) -> None:
+            raise RuntimeError("order is not cancelable")
+
+    with pytest.raises(BrokerError):
+        make_broker(_Refusing()).cancel_order("leg-1")

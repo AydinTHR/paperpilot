@@ -14,6 +14,7 @@ tests; the real one is built lazily from settings.
 from __future__ import annotations
 
 import threading
+from datetime import datetime
 from typing import Any
 
 from config.logging_config import get_logger
@@ -76,6 +77,11 @@ class TradeStreamListener:
                 filled_qty=float(getattr(order, "filled_qty", 0.0) or 0.0),
                 filled_avg_price=(
                     float(price) if (price := getattr(order, "filled_avg_price", None)) else None
+                ),
+                filled_at=(
+                    filled_at
+                    if isinstance(filled_at := getattr(order, "filled_at", None), datetime)
+                    else None
                 ),
             )
             logger.info("Trade stream reconciled order %s (%s).", order_id, event)

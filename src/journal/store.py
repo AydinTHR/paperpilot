@@ -94,6 +94,7 @@ class Journal:
         # user's journal file was created must be migrated explicitly.
         _ensure_column(self._engine, "orders", "filled_qty", "FLOAT DEFAULT 0.0")
         _ensure_column(self._engine, "orders", "strategy", "VARCHAR(64) DEFAULT ''")
+        _ensure_column(self._engine, "orders", "filled_at", "DATETIME")
         self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
         logger.info("Trade journal ready at %s", db_url)
 
@@ -130,6 +131,7 @@ class Journal:
         broker_order_id: str = "",
         filled_qty: float = 0.0,
         filled_avg_price: float | None = None,
+        filled_at: datetime | None = None,
         reason: str = "",
         ts: datetime | None = None,
     ) -> int:
@@ -143,6 +145,7 @@ class Journal:
             broker_order_id=broker_order_id,
             filled_qty=filled_qty,
             filled_avg_price=filled_avg_price,
+            filled_at=filled_at,
             reason=reason,
         )
         return self._add(row)
@@ -154,6 +157,7 @@ class Journal:
         status: str,
         filled_qty: float,
         filled_avg_price: float | None,
+        filled_at: datetime | None = None,
     ) -> bool:
         """Reconcile an order row's fill fields in place; True if a row matched.
 
@@ -175,6 +179,8 @@ class Journal:
             row.status = status
             row.filled_qty = filled_qty
             row.filled_avg_price = filled_avg_price
+            if filled_at is not None:
+                row.filled_at = filled_at
             session.commit()
         return True
 

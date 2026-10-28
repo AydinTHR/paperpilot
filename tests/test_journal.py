@@ -107,10 +107,25 @@ def test_ensure_column_migrates_old_database(tmp_path) -> None:
     orders = journal.recent_orders()
     assert orders[0].symbol == "AAPL"
     assert orders[0].filled_qty == 0.0  # defaulted on the legacy row
+    assert orders[0].filled_at is None  # added as a nullable column
 
     # New writes populate it.
     journal.record_order(symbol="MSFT", side="buy", qty=3, filled_qty=3.0)
     assert journal.recent_orders()[-1].filled_qty == 3.0
+
+
+def test_update_order_fill_records_fill_time() -> None:
+    journal = Journal("sqlite:///:memory:")
+    journal.record_order(symbol="AAPL", side="sell", qty=5, status="held", broker_order_id="leg-1")
+    fired = _ts(90)
+    journal.update_order_fill(
+        "leg-1", status="filled", filled_qty=5, filled_avg_price=95.0, filled_at=fired
+    )
+    # A later update without a fill time keeps the one already recorded.
+    journal.update_order_fill("leg-1", status="filled", filled_qty=5, filled_avg_price=95.0)
+    row = journal.recent_orders()[0]
+    assert row.filled_at is not None
+    assert row.filled_at.replace(tzinfo=None) == fired.replace(tzinfo=None)
 
 
 def test_update_order_fill_reconciles_in_place() -> None:

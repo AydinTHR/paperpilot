@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from config.settings import Settings
@@ -60,6 +61,30 @@ def test_fill_event_reconciles_journal_row() -> None:
     assert row.status == "filled"
     assert row.filled_qty == 10.0
     assert row.filled_avg_price == 101.25
+
+
+def test_stop_leg_fill_records_its_fill_time() -> None:
+    journal = Journal("sqlite:///:memory:")
+    journal.record_order(symbol="AAPL", side="sell", qty=10, status="held", broker_order_id="leg-1")
+    listener, _ = _listener(journal)
+    fired = datetime(2026, 6, 2, 14, 30, tzinfo=UTC)
+
+    asyncio.run(
+        listener._on_update(
+            _update(
+                "fill",
+                id="leg-1",
+                status="filled",
+                filled_qty="10",
+                filled_avg_price="95.0",
+                filled_at=fired,
+            )
+        )
+    )
+    row = journal.recent_orders()[0]
+    assert (row.status, row.filled_avg_price) == ("filled", 95.0)
+    assert row.filled_at is not None
+    assert row.filled_at.replace(tzinfo=None) == fired.replace(tzinfo=None)
 
 
 def test_non_fill_events_ignored() -> None:

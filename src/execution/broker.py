@@ -9,11 +9,17 @@ at this boundary unless deliberately enabled in settings.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderClass, OrderSide, QueryOrderStatus, TimeInForce
-from alpaca.trading.requests import GetOrdersRequest, MarketOrderRequest, StopLossRequest
+from alpaca.trading.requests import (
+    GetOrderByIdRequest,
+    GetOrdersRequest,
+    MarketOrderRequest,
+    StopLossRequest,
+)
 
 from config.logging_config import get_logger
 from config.settings import (
@@ -77,6 +83,9 @@ class OrderInfo:
     status: str
     filled_qty: float
     filled_avg_price: float | None
+    filled_at: datetime | None = None
+    # Child orders of an OTO/bracket order, such as the broker-held stop leg.
+    legs: tuple[OrderInfo, ...] = ()
 
 
 class TradingClientProtocol(Protocol):
@@ -91,7 +100,7 @@ class TradingClientProtocol(Protocol):
     def submit_order(self, order_data): ...
     def cancel_orders(self): ...
     def close_position(self, symbol_or_asset_id): ...
-    def get_order_by_id(self, order_id): ...
+    def get_order_by_id(self, order_id, filter=None): ...
     def get_orders(self, filter=None): ...
     def cancel_order_by_id(self, order_id): ...
 
@@ -325,12 +334,20 @@ class Broker:
         logger.info("Closed position: %s", symbol)
         return self._to_order_info(closing) if closing is not None else None
 
+    def cancel_order(self, order_id: str) -> None:
+        """Cancel one order by id, such as a single stop leg."""
+        try:
+            self._client.cancel_order_by_id(order_id)
+        except Exception as exc:
+            raise BrokerError(f"Failed to cancel order {order_id}: {exc}") from exc
+        logger.info("Cancelled order %s.", order_id)
+
     # --- order status ---
 
     def get_order(self, order_id: str) -> OrderInfo:
-        """Fetch one order's current status/fill state by id."""
+        """Fetch one order's current status/fill state by id, with its legs."""
         try:
-            order = self._client.get_order_by_id(order_id)
+            order = self._client.get_order_by_id(order_id, filter=GetOrderByIdRequest(nested=True))
         except Exception as exc:
             raise BrokerError(f"Failed to fetch order {order_id}: {exc}") from exc
         return self._to_order_info(order)
@@ -379,6 +396,7 @@ class Broker:
             return _enum_str(getattr(order, attr, ""))
 
         filled_price = getattr(order, "filled_avg_price", None)
+        filled_at = getattr(order, "filled_at", None)
         return OrderInfo(
             id=str(getattr(order, "id", "")),
             symbol=str(getattr(order, "symbol", "")),
@@ -388,4 +406,6 @@ class Broker:
             status=_enum_val("status"),
             filled_qty=_to_float(getattr(order, "filled_qty", None)),
             filled_avg_price=(_to_float(filled_price) if filled_price is not None else None),
+            filled_at=filled_at if isinstance(filled_at, datetime) else None,
+            legs=tuple(Broker._to_order_info(leg) for leg in (getattr(order, "legs", None) or ())),
         )

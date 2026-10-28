@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from config.settings import Settings
-from src.execution.broker import AccountSnapshot, OrderInfo, PositionInfo
+from src.execution.broker import AccountSnapshot, BrokerError, OrderInfo, PositionInfo
 from src.experiments.harness import (
     ExperimentHarness,
     VirtualPortfolio,
@@ -114,6 +115,110 @@ def test_virtual_sell_realizes_pnl_into_cash() -> None:
     cash_after_buy = arm.get_account().cash
     arm.close_position("AAPL")  # +1000 (same fill price)
     assert arm.get_account().cash == pytest.approx(cash_after_buy + 1_000.0)
+
+
+# --- VirtualPortfolio stop legs ---------------------------------------------------
+
+
+class _FakeStopBroker(_FakeRealBroker):
+    """Entries carry a stop leg, as Alpaca's OTO does; a test can fire one."""
+
+    def __init__(self, equity: float = 90_000.0) -> None:
+        super().__init__(equity)
+        self.legs: dict[str, OrderInfo] = {}
+        self.log: list[tuple[str, str]] = []
+
+    def place_market_order(self, symbol: str, qty: float, side: str) -> OrderInfo:
+        self.log.append(("order", f"{side} {qty:g} {symbol.upper()}"))
+        return super().place_market_order(symbol, qty, side)
+
+    def place_market_order_with_stop(self, symbol, qty, side, stop_price, *, ref_price=None):
+        parent = self.place_market_order(symbol, qty, side)
+        leg = OrderInfo(
+            id=f"leg-{len(self.legs) + 1}",
+            symbol=symbol.upper(),
+            qty=qty,
+            side="sell",
+            order_type="stop",
+            status="new",
+            filled_qty=0.0,
+            filled_avg_price=None,
+        )
+        self.legs[leg.id] = leg
+        return dataclasses.replace(parent, legs=(leg,))
+
+    def get_order(self, order_id: str) -> OrderInfo:
+        return self.legs[order_id]
+
+    def cancel_order(self, order_id: str) -> None:
+        leg = self.legs[order_id]
+        if leg.status == "filled":
+            raise BrokerError(f"order {order_id} is not cancelable")
+        self.log.append(("cancel", order_id))
+        self.legs[order_id] = dataclasses.replace(leg, status="canceled")
+
+    def fire(self, leg_id: str, price: float, qty: float | None = None) -> None:
+        leg = self.legs[leg_id]
+        filled = leg.qty if qty is None else qty
+        status = "filled" if filled >= leg.qty else "partially_filled"
+        self.legs[leg_id] = dataclasses.replace(
+            leg, status=status, filled_qty=filled, filled_avg_price=price
+        )
+
+
+def test_virtual_close_cancels_only_its_own_stop_leg_first() -> None:
+    real = _FakeStopBroker()
+    arm_a = VirtualPortfolio(real, fraction=0.5, name="sma")
+    arm_b = VirtualPortfolio(real, fraction=0.5, name="rsi")
+    arm_a.place_market_order_with_stop("AAPL", 100, "buy", 95.0)  # leg-1
+    arm_b.place_market_order_with_stop("AAPL", 40, "buy", 95.0)  # leg-2
+
+    arm_b.close_position("AAPL")
+
+    # Its stop is released before the sell, so Alpaca does not reject it.
+    assert real.log[-2:] == [("cancel", "leg-2"), ("order", "sell 40 AAPL")]
+    assert real.legs["leg-1"].status == "new"  # the other arm's stop is untouched
+    assert arm_a.get_positions()[0].qty == 100
+    assert arm_b.get_positions() == []
+
+
+def test_virtual_ledger_books_a_stop_that_fired_at_the_broker() -> None:
+    real = _FakeStopBroker()
+    arm = VirtualPortfolio(real, fraction=1.0, name="sma")
+    arm.place_market_order_with_stop("AAPL", 10, "buy", 95.0)  # -1000 @ 100
+    cash_after_buy = arm.get_account().cash
+
+    real.fire("leg-1", price=95.0)
+
+    assert arm.get_positions() == []  # the stop sold the shares
+    assert arm.get_account().cash == pytest.approx(cash_after_buy + 950.0)
+    assert arm.close_position("AAPL") is None  # nothing left to sell
+    assert [entry for entry in real.log if entry[0] == "order"] == [("order", "buy 10 AAPL")]
+
+
+def test_virtual_close_books_a_stop_that_fired_instead_of_selling_twice() -> None:
+    real = _FakeStopBroker()
+    arm = VirtualPortfolio(real, fraction=1.0, name="sma")
+    arm.place_market_order_with_stop("AAPL", 10, "buy", 95.0)
+    real.fire("leg-1", price=95.0)  # fires after the last read, before the close
+
+    assert arm.close_position("AAPL") is None
+    assert ("order", "sell 10 AAPL") not in real.log
+    assert arm.get_positions() == []
+
+
+def test_virtual_close_after_a_partial_stop_sells_only_the_rest() -> None:
+    real = _FakeStopBroker()
+    arm = VirtualPortfolio(real, fraction=1.0, name="sma")
+    arm.place_market_order_with_stop("AAPL", 10, "buy", 95.0)
+    real.fire("leg-1", price=95.0, qty=4)
+
+    assert arm.get_positions()[0].qty == 6
+    assert arm.get_positions()[0].qty == 6  # the same partial fill is booked once
+    arm.close_position("AAPL")
+
+    assert real.log[-2:] == [("cancel", "leg-1"), ("order", "sell 6 AAPL")]
+    assert arm.get_positions() == []
 
 
 # --- harness construction ----------------------------------------------------------

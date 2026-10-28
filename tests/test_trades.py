@@ -7,7 +7,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from src.journal.store import Journal
-from src.journal.trades import build_trades, summarize_by_strategy
+from src.journal.trades import STOP_LEG_REASON, build_trades, summarize_by_strategy
 
 T0 = datetime(2026, 6, 1, 15, 0, tzinfo=UTC)
 
@@ -151,3 +151,60 @@ def test_summarize_handles_all_wins_profit_factor() -> None:
     journal = _journal_with(_buy(qty=10, px=100.0), _sell(qty=10, px=110.0))
     report = summarize_by_strategy(build_trades(journal._all_orders()))
     assert report["sma"].profit_factor == float("inf")
+
+
+# --- broker-held stop legs ------------------------------------------------------
+
+
+def _stop_leg(qty=10, ts=T0, **fill):
+    row = {
+        "symbol": "AAPL",
+        "side": "sell",
+        "qty": qty,
+        "strategy": "sma",
+        "status": "accepted",
+        "broker_order_id": "leg-1",
+        "reason": STOP_LEG_REASON,
+        "ts": ts,
+    }
+    row.update(fill)
+    return row
+
+
+def test_unfilled_stop_leg_is_not_a_sale() -> None:
+    # On a legacy row, "accepted" with no fill counts as filled. A stop leg
+    # that has not fired must leave the lot open for the real exit.
+    journal = _journal_with(_buy(qty=10, px=100.0), _stop_leg(), _sell(qty=10, px=110.0))
+    trades = build_trades(journal._all_orders())
+    assert len(trades) == 1
+    assert trades[0].exit_reason == "signal SELL"
+    assert trades[0].pnl == pytest.approx(100.0)
+
+
+def test_filled_stop_leg_closes_the_lot_at_its_fill_time() -> None:
+    fired = T0 + timedelta(hours=26)
+    journal = _journal_with(
+        _buy(qty=10, px=100.0),
+        _stop_leg(status="filled", filled_qty=10, filled_avg_price=95.0, filled_at=fired),
+    )
+    trades = build_trades(journal._all_orders())
+    assert len(trades) == 1
+    trade = trades[0]
+    assert trade.exit_reason == STOP_LEG_REASON
+    assert trade.exit_px == 95.0
+    assert trade.pnl == pytest.approx(-50.0)
+    # Dated by the fill, not by the row written when the stop was placed.
+    assert trade.holding_period_hours == pytest.approx(26.0)
+
+
+def test_partially_filled_then_cancelled_stop_leg_counts_its_fill() -> None:
+    journal = _journal_with(
+        _buy(qty=10, px=100.0),
+        _stop_leg(status="canceled", filled_qty=4, filled_avg_price=95.0),
+        _sell(qty=6, px=110.0),
+    )
+    trades = build_trades(journal._all_orders())
+    assert [(t.qty, t.exit_reason) for t in trades] == [
+        (4, STOP_LEG_REASON),
+        (6, "signal SELL"),
+    ]

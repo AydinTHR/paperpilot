@@ -27,6 +27,7 @@ from src.data.market_data import build_provider
 from src.execution.broker import AccountSnapshot, Broker, BrokerError, OrderInfo, PositionInfo
 from src.execution.reconcile import TERMINAL_STATUSES, OrderReconciler
 from src.journal.store import Journal
+from src.journal.trades import STOP_LEG_REASON
 from src.monitoring.alerts import Alerter, NullAlerter, build_alerter
 from src.risk.manager import RiskManager
 from src.strategy.base import Action, Strategy
@@ -359,10 +360,49 @@ class TradingLoop:
             broker_order_id=order.id,
             filled_qty=recon.filled_qty,
             filled_avg_price=recon.filled_avg_price,
+            filled_at=recon.filled_at,
             reason="signal BUY",
             ts=now,
         )
+        if use_stop:
+            self._journal_stop_legs(symbol, qty, order, now)
         return SymbolOutcome(symbol, "BUY", reason, qty=qty, price=price, order_id=order.id)
+
+    def _journal_stop_legs(self, symbol: str, qty: float, order: OrderInfo, now: datetime) -> None:
+        """Journal the entry's broker-held stop leg as a pending sell.
+
+        When the stop fires, Alpaca fills the leg, which has its own order id.
+        Without a row carrying that id, neither the per-tick sweep nor the
+        trade stream can record the exit, and FIFO pairing never closes the
+        lot. The row counts as a sale only once a fill is reconciled to it.
+        """
+        legs = order.legs
+        if not legs:
+            try:
+                legs = self.broker.get_order(order.id).legs
+            except Exception as exc:
+                logger.warning("Could not read the stop leg of order %s: %s", order.id, exc)
+        stop_legs = [leg for leg in legs if leg.side.lower() == "sell" and leg.id]
+        if not stop_legs:
+            logger.warning(
+                "No stop leg found on order %s; a stop-out on %s will not reach the trades table.",
+                order.id,
+                symbol,
+            )
+        for leg in stop_legs:
+            self.journal.record_order(
+                symbol=symbol,
+                strategy=self.strategy.name,
+                side="sell",
+                qty=leg.qty or qty,
+                status=leg.status,
+                broker_order_id=leg.id,
+                filled_qty=leg.filled_qty,
+                filled_avg_price=leg.filled_avg_price,
+                filled_at=leg.filled_at,
+                reason=STOP_LEG_REASON,
+                ts=now,
+            )
 
     def _reconcile_open_orders(self) -> None:
         """Back-fill journaled orders whose fills landed while we weren't looking.
@@ -388,6 +428,7 @@ class TradingLoop:
                     status=order.status,
                     filled_qty=order.filled_qty,
                     filled_avg_price=order.filled_avg_price,
+                    filled_at=order.filled_at,
                 )
                 logger.info(
                     "Re-reconciled order %s -> %s (filled %g).",
@@ -416,6 +457,7 @@ class TradingLoop:
                 broker_order_id=order.id,
                 filled_qty=recon.filled_qty,
                 filled_avg_price=recon.filled_avg_price,
+                filled_at=recon.filled_at,
                 reason=reason,
                 ts=now,
             )

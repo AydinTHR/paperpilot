@@ -8,6 +8,7 @@ insufficient-bars skip -- without any network, SDK, or real money.
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import UTC, datetime, timedelta
 
 import numpy as np
@@ -18,6 +19,7 @@ from config.settings import Settings
 from src.agent.loop import TradingLoop
 from src.execution.broker import AccountSnapshot, BrokerError, OrderInfo, PositionInfo
 from src.journal.store import Journal
+from src.journal.trades import STOP_LEG_REASON
 from src.risk.manager import RiskManager
 from src.strategy.base import Action, Signal, Strategy
 
@@ -596,6 +598,98 @@ def test_loop_stop_backstops_when_no_live_stop_order() -> None:
     result = loop.run_once(now=NOW)
     assert broker.closed == ["AAPL"]
     assert result.outcomes[0].action == "STOP"
+
+
+class _StopLegBroker(_FakeBroker):
+    """Entries come back with their stop leg, as Alpaca's OTO response does."""
+
+    def __init__(self, *args, legs_on_submit: bool = True, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.legs_on_submit = legs_on_submit
+        self.leg: OrderInfo | None = None
+
+    def place_market_order_with_stop(
+        self,
+        symbol: str,
+        qty: float,
+        side: str,
+        stop_price: float,
+        *,
+        ref_price: float | None = None,
+    ) -> OrderInfo:
+        parent = super().place_market_order_with_stop(
+            symbol, qty, side, stop_price, ref_price=ref_price
+        )
+        self.leg = OrderInfo(
+            id="leg-1",
+            symbol=symbol.upper(),
+            qty=qty,
+            side="sell",
+            order_type="stop",
+            status="held",
+            filled_qty=0.0,
+            filled_avg_price=None,
+        )
+        parent = dataclasses.replace(parent, legs=(self.leg,))
+        self.orders[-1] = parent  # a nested read returns the leg
+        return parent if self.legs_on_submit else dataclasses.replace(parent, legs=())
+
+    def get_order(self, order_id: str) -> OrderInfo:
+        if self.leg is not None and order_id == self.leg.id:
+            return self.leg
+        return super().get_order(order_id)
+
+
+def _buying_loop(broker):
+    return _loop_with_settings(
+        broker,
+        _FakeProvider(_bars(last_close=100.0)),
+        _StubStrategy(Signal(Action.BUY, confidence=1.0)),
+        _stops_settings(),
+        symbols=["AAPL"],
+    )
+
+
+def test_entry_journals_its_stop_leg() -> None:
+    broker = _StopLegBroker(equity=100_000.0, cash=100_000.0)
+    loop = _buying_loop(broker)
+    loop.run_once(now=NOW)
+
+    buy, leg = loop.journal.recent_orders()
+    assert (buy.side, buy.broker_order_id) == ("buy", "ord-1")
+    assert (leg.side, leg.broker_order_id, leg.reason) == ("sell", "leg-1", STOP_LEG_REASON)
+    assert (leg.status, leg.qty, leg.filled_qty) == ("held", 100, 0.0)
+
+
+def test_stop_leg_read_back_when_the_submit_response_omits_it() -> None:
+    broker = _StopLegBroker(equity=100_000.0, cash=100_000.0, legs_on_submit=False)
+    loop = _buying_loop(broker)
+    loop.run_once(now=NOW)
+    assert [o.broker_order_id for o in loop.journal.recent_orders()] == ["ord-1", "leg-1"]
+
+
+def test_broker_stop_out_reaches_the_trades_table() -> None:
+    broker = _StopLegBroker(equity=100_000.0, cash=100_000.0)
+    loop = _buying_loop(broker)
+    loop.run_once(now=NOW)  # buys 100 @ 100 with a stop leg at the broker
+
+    # The stop fires between ticks: Alpaca fills the leg and the position is gone.
+    fired = NOW + timedelta(hours=20)
+    assert broker.leg is not None
+    broker.leg = dataclasses.replace(
+        broker.leg, status="filled", filled_qty=100, filled_avg_price=95.0, filled_at=fired
+    )
+    loop.strategy = _StubStrategy(Signal(Action.HOLD))
+    loop.run_once(now=NOW + timedelta(days=1))  # the sweep reconciles the leg
+
+    loop.journal.rebuild_trades()
+    trades = loop.journal.recent_trades()
+    assert len(trades) == 1
+    trade = trades[0]
+    assert trade.exit_reason == STOP_LEG_REASON
+    assert trade.exit_px == 95.0
+    assert trade.pnl == pytest.approx(-500.0)
+    assert trade.holding_period_hours == pytest.approx(20.0)
 
 
 # --- persisted halt restoration on startup -------------------------------------

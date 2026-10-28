@@ -34,6 +34,7 @@ from config.settings import Settings, get_settings
 from src.agent.loop import LoopResult, TradingLoop
 from src.data.market_data import build_provider
 from src.execution.broker import AccountSnapshot, Broker, OrderInfo, PositionInfo
+from src.execution.reconcile import TERMINAL_STATUSES
 from src.journal.store import Journal
 from src.risk.manager import RiskManager
 from src.strategy.base import Strategy
@@ -52,7 +53,8 @@ class VirtualPortfolio:
     Keeps a virtual cash balance and position book; only *orders* touch the
     real account. The ledger books fills at the order's fill price when the
     (near-instant) paper fill reports one, else at the caller's price via the
-    real position's latest mark.
+    real position's latest mark. The arm's broker-held stop legs are tracked
+    too, so a stop that fires at the broker reaches the ledger.
     """
 
     def __init__(self, broker: Broker, fraction: float, name: str) -> None:
@@ -61,10 +63,14 @@ class VirtualPortfolio:
         account = broker.get_account()
         self._cash = account.equity * fraction
         self._book: dict[str, PositionInfo] = {}
+        # Live stop legs per symbol, each with the quantity already booked
+        # from it, so a fill is booked once however often it is read.
+        self._stop_legs: dict[str, dict[str, float]] = {}
 
     # --- BrokerLike surface ---
 
     def get_account(self) -> AccountSnapshot:
+        self._sync_stop_legs()
         real = self._broker.get_account()
         equity = self._cash + sum(
             p.qty * self._mark(p.symbol, p.avg_entry_price) for p in self._book.values()
@@ -80,6 +86,7 @@ class VirtualPortfolio:
         )
 
     def get_positions(self) -> list[PositionInfo]:
+        self._sync_stop_legs()
         positions = []
         for p in self._book.values():
             price = self._mark(p.symbol, p.avg_entry_price)
@@ -115,11 +122,20 @@ class VirtualPortfolio:
             symbol, qty, side, stop_price, ref_price=ref_price
         )
         self._book_fill(order, side)
+        self._track_stop_legs(symbol, order)
         return order
 
     def close_position(self, symbol: str) -> OrderInfo | None:
-        """Sell only THIS arm's shares -- never the whole real position."""
+        """Sell only THIS arm's shares -- never the whole real position.
+
+        The arm's own stop leg is cancelled first: Alpaca reserves the shares a
+        live stop holds and rejects a sell for them, which is why
+        ``Broker.close_position`` cancels open orders too. Other arms' stops on
+        the same symbol are left alone. A leg that already filled is booked
+        rather than sold a second time.
+        """
         symbol = symbol.upper()
+        self._release_stop_legs(symbol)
         held = self._book.get(symbol)
         if held is None or held.qty <= 0:
             return None
@@ -169,26 +185,82 @@ class VirtualPortfolio:
                     unrealized_pl=(price - avg) * total,
                     unrealized_plpc=0.0,
                 )
-        else:  # sell
-            held = self._book.get(symbol)
-            if held is None:
-                return
-            sold = min(qty, held.qty)
-            self._cash += sold * price
-            remaining = held.qty - sold
-            if remaining <= 1e-9:
-                self._book.pop(symbol, None)
-            else:
-                self._book[symbol] = PositionInfo(
-                    symbol=symbol,
-                    qty=remaining,
-                    side="long",
-                    avg_entry_price=held.avg_entry_price,
-                    current_price=price,
-                    market_value=remaining * price,
-                    unrealized_pl=(price - held.avg_entry_price) * remaining,
-                    unrealized_plpc=0.0,
+        else:
+            self._book_sell(symbol, qty, price)
+
+    def _book_sell(self, symbol: str, qty: float, price: float) -> None:
+        held = self._book.get(symbol)
+        if held is None:
+            return
+        sold = min(qty, held.qty)
+        self._cash += sold * price
+        remaining = held.qty - sold
+        if remaining <= 1e-9:
+            self._book.pop(symbol, None)
+        else:
+            self._book[symbol] = PositionInfo(
+                symbol=symbol,
+                qty=remaining,
+                side="long",
+                avg_entry_price=held.avg_entry_price,
+                current_price=price,
+                market_value=remaining * price,
+                unrealized_pl=(price - held.avg_entry_price) * remaining,
+                unrealized_plpc=0.0,
+            )
+
+    # --- stop legs ---
+
+    def _track_stop_legs(self, symbol: str, order: OrderInfo) -> None:
+        """Remember the stop leg an entry placed, so its fill reaches the ledger."""
+        legs = order.legs
+        if not legs:
+            try:
+                legs = self._broker.get_order(order.id).legs
+            except Exception as exc:
+                logger.warning(
+                    "%s: could not read the stop leg of %s: %s", self.name, order.id, exc
                 )
+        for leg in legs:
+            if leg.side.lower() == "sell" and leg.id:
+                self._stop_legs.setdefault(symbol.upper(), {})[leg.id] = 0.0
+
+    def _sync_stop_legs(self) -> None:
+        """Book whatever this arm's stop legs have sold since the last look.
+
+        A stop that fires at the broker sells the arm's shares without the
+        ledger hearing about it. Until it does, the arm still thinks it holds
+        them and would try to sell them again.
+        """
+        for symbol in list(self._stop_legs):
+            for leg_id in list(self._stop_legs.get(symbol, {})):
+                self._refresh_stop_leg(symbol, leg_id)
+
+    def _release_stop_legs(self, symbol: str) -> None:
+        """Cancel this arm's stop legs on ``symbol``, booking any fill first."""
+        for leg_id in list(self._stop_legs.get(symbol, {})):
+            try:
+                self._broker.cancel_order(leg_id)
+            except Exception as exc:  # already filled or cancelled, or the API is down
+                logger.warning("%s: could not cancel stop leg %s: %s", self.name, leg_id, exc)
+            self._refresh_stop_leg(symbol, leg_id)
+
+    def _refresh_stop_leg(self, symbol: str, leg_id: str) -> None:
+        """Book a stop leg's new fill, and stop tracking it once it is final."""
+        legs = self._stop_legs.get(symbol, {})
+        try:
+            leg = self._broker.get_order(leg_id)
+        except Exception as exc:
+            logger.warning("%s: could not read stop leg %s: %s", self.name, leg_id, exc)
+            return
+        new_qty = leg.filled_qty - legs.get(leg_id, 0.0)
+        if new_qty > 1e-9 and leg.filled_avg_price:
+            self._book_sell(symbol, new_qty, leg.filled_avg_price)
+            legs[leg_id] = leg.filled_qty
+        if leg.status.lower() in TERMINAL_STATUSES:
+            legs.pop(leg_id, None)
+            if not legs:
+                self._stop_legs.pop(symbol, None)
 
     def _mark(self, symbol: str, fallback: float) -> float:
         """Latest price for a held symbol, from the real account's position."""

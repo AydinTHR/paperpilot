@@ -16,6 +16,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Protocol
 
 from config.logging_config import get_logger
@@ -46,6 +47,7 @@ class ReconcileResult:
     filled_avg_price: float | None
     attempts: int
     elapsed_s: float
+    filled_at: datetime | None = None
 
 
 class OrderReconciler:
@@ -118,4 +120,5 @@ class OrderReconciler:
             filled_avg_price=order.filled_avg_price if order else None,
             attempts=attempts,
             elapsed_s=self._clock() - started,
+            filled_at=order.filled_at if order else None,
         )

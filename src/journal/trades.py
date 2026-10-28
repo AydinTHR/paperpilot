@@ -22,6 +22,11 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from src.journal.models import OrderRecord
 
+# The ``reason`` of a journaled broker-held stop leg. The leg is recorded when
+# its entry is placed, so the journal holds an id the broker's fill can later
+# be reconciled to; until then it is a sell that has not happened.
+STOP_LEG_REASON = "broker stop-loss"
+
 
 @dataclass(frozen=True)
 class TradeInput:
@@ -53,6 +58,8 @@ def _fill_qty(order: OrderRecord) -> float:
     """Actual filled quantity; legacy filled rows fall back to requested qty."""
     if order.filled_qty and order.filled_qty > 0:
         return float(order.filled_qty)
+    if order.reason == STOP_LEG_REASON:
+        return 0.0  # a stop leg counts only once a fill is reconciled to it
     status = (order.status or "").lower()
     if status in ("filled", "submitted", "accepted", ""):
         return float(order.qty)
@@ -63,6 +70,11 @@ def _fill_price(order: OrderRecord) -> float | None:
     if order.filled_avg_price is not None and order.filled_avg_price > 0:
         return float(order.filled_avg_price)
     return None
+
+
+def _fill_time(order: OrderRecord) -> datetime:
+    """When the order filled, falling back to when it was journaled."""
+    return order.filled_at or order.ts
 
 
 def build_trades(orders: list[OrderRecord]) -> list[TradeInput]:
@@ -87,7 +99,7 @@ def build_trades(orders: list[OrderRecord]) -> list[TradeInput]:
             if price is None:
                 continue  # cannot open a lot without a real entry price
             open_lots.setdefault(key, deque()).append(
-                _Lot(qty=qty, price=price, time=order.ts, reason=order.reason or "")
+                _Lot(qty=qty, price=price, time=_fill_time(order), reason=order.reason or "")
             )
             continue
 
@@ -100,13 +112,14 @@ def build_trades(orders: list[OrderRecord]) -> list[TradeInput]:
             matched = min(lot.qty, remaining)
             if price is not None:
                 pnl = (price - lot.price) * matched
-                held = (order.ts - lot.time).total_seconds() / 3600.0
+                exit_time = _fill_time(order)
+                held = (exit_time - lot.time).total_seconds() / 3600.0
                 trades.append(
                     TradeInput(
                         symbol=order.symbol,
                         strategy=order.strategy or "",
                         entry_time=lot.time,
-                        exit_time=order.ts,
+                        exit_time=exit_time,
                         qty=matched,
                         entry_px=lot.price,
                         exit_px=price,

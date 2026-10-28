@@ -54,6 +54,9 @@ class OrderRecord(Base):
     broker_order_id: Mapped[str] = mapped_column(String(64), default="")
     filled_qty: Mapped[float] = mapped_column(Float, default=0.0)
     filled_avg_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # When the broker reports the fill. A stop leg is journaled when it is
+    # placed and fills much later, so ``ts`` alone would misdate the exit.
+    filled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     reason: Mapped[str] = mapped_column(String(64), default="")
 
     def __repr__(self) -> str:  # pragma: no cover - debugging aid
